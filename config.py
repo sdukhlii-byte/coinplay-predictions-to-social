@@ -43,6 +43,11 @@ X_API_SECRET = _opt("X_API_SECRET")
 X_ACCESS_TOKEN = _opt("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = _opt("X_ACCESS_SECRET")
 X_TEXT_LIMIT = int(_opt("X_TEXT_LIMIT", "280"))
+# Что делать, если текст не влезает в лимит X:
+#   fit    — ужать в один твит, сохранив призыв в конце (по умолчанию)
+#   thread — разрезать на связанные твиты (1/2), (2/2)
+#   skip   — не публиковать в X
+X_LONG_TEXT_MODE = _opt("X_LONG_TEXT_MODE", "fit").lower()
 
 if X_ENABLED and not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET]):
     raise RuntimeError(

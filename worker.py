@@ -27,6 +27,7 @@ from config import (
     WORKER_INTERVAL_SECONDS,
     X_ENABLED,
     X_HASHTAGS,
+    X_LONG_TEXT_MODE,
     X_SELECT_STRATEGY,
     X_TEXT_LIMIT,
 )
@@ -83,6 +84,19 @@ def _publish_x(burst: dict, candidates: list) -> list:
         return None
 
     text = _clean_text(chosen.get("text", ""))
+
+    # Резервируем место под хештеги, иначе они не влезут после сжатия.
+    tags = hashtags.parse(X_HASHTAGS)
+    reserve = len(" ".join(tags)) + 2 if tags else 0
+
+    if X_LONG_TEXT_MODE == "skip" and len(text) + reserve > X_TEXT_LIMIT:
+        log.info("X: текст %d симв. не влезает в %d — пропускаю площадку",
+                 len(text), X_TEXT_LIMIT)
+        return None
+
+    if X_LONG_TEXT_MODE != "thread":
+        text = x_api.fit(text, X_TEXT_LIMIT - reserve)
+
     text = hashtags.append(text, X_HASHTAGS, X_TEXT_LIMIT)
     media_entries = _resolve_media(chosen)
 

@@ -9,6 +9,7 @@
 
 import logging
 import os
+import re
 import time
 
 import requests
@@ -46,6 +47,44 @@ def whoami() -> dict:
     if r.status_code >= 400:
         raise XError(f"GET users/me -> {r.status_code}: {r.text[:300]}")
     return r.json().get("data", {})
+
+
+def fit(text: str, limit: int = X_TEXT_LIMIT) -> str:
+    """
+    Ужимает текст под лимит одного твита.
+
+    Пост состоит из смысловых блоков, разделённых пустой строкой, а последний
+    блок — это призыв к действию ("Link in bio"). При разрезании в тред он
+    уезжал во второй твит, который почти никто не открывает, поэтому здесь
+    последний блок сохраняется всегда, а вырезается середина.
+    """
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
+    if len(blocks) < 2:
+        return text[:limit].rstrip()
+
+    head, tail = blocks[:-1], blocks[-1]
+
+    # Хвост (призыв) сам по себе не влезает — режем жёстко.
+    if len(tail) >= limit:
+        return text[:limit].rstrip()
+
+    kept = []
+    for block in head:
+        trial = kept + [block]
+        if len("\n\n".join(trial + [tail])) > limit:
+            break
+        kept = trial
+
+    result = "\n\n".join(kept + [tail])
+    dropped = len(head) - len(kept)
+    if dropped:
+        log.info("Текст ужат под лимит %d: убрано %d блок(ов) из середины",
+                 limit, dropped)
+    return result
 
 
 def split_text(text: str, limit: int = X_TEXT_LIMIT) -> list:
