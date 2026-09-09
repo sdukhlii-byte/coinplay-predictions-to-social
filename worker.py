@@ -103,8 +103,8 @@ def _publish_instagram(burst: dict, candidates: list) -> list:
         log.info("IG: у пачки %s нет медиа — пропускаю площадку", burst["id"][:8])
         return None
 
-    log.info("Instagram: публикую msg %s, медиа %d",
-             chosen.get("message_id"), len(media))
+    log.info("Instagram: публикую msg %s, медиа %d — %s",
+             chosen.get("message_id"), len(media), [m["url"] for m in media])
     return instagram_api.publish(text, media)
 
 
