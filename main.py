@@ -7,6 +7,7 @@ Telegram-группа → Threads: автопостинг.
 """
 
 import logging
+import json
 import os
 from contextlib import asynccontextmanager
 
@@ -21,6 +22,7 @@ import threads_api
 import worker
 import x_api
 from config import (
+    ADMIN_TOKEN,
     DATA_DIR,
     INSTAGRAM_ENABLED,
     MEDIA_DIR,
@@ -128,3 +130,37 @@ async def dialogs():
         return {"dialogs": await telegram_source.list_dialogs()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/admin/requeue/{burst_id}")
+def admin_requeue(burst_id: str, token: str = ""):
+    """
+    Ставит уже обработанную пачку обратно в очередь — воркер подхватит её в
+    ближайший тик (WORKER_INTERVAL_SECONDS) и опубликует на те площадки,
+    которых ещё нет в её 'results' (площадки, уже отмеченные успешными,
+    повторно не публикуются — см. worker._process_burst).
+
+    Нужен, например, чтобы прогнать старый пост в Instagram после того, как
+    его включили уже после публикации в Threads/X.
+    """
+    if not ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=403,
+            detail="ADMIN_TOKEN не задан — /admin отключён. "
+                   "Задайте ADMIN_TOKEN в переменных окружения, чтобы включить.",
+        )
+    if token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Неверный token")
+
+    burst = db.get_burst(burst_id)
+    if not burst:
+        raise HTTPException(status_code=404, detail="Пачка не найдена")
+
+    db.requeue_burst(burst_id)
+    log.info("Пачка %s поставлена в очередь вручную через /admin/requeue",
+             burst_id[:8])
+    return {
+        "requeued": burst_id,
+        "title": (burst.get("manifest") or "").splitlines()[0][:80],
+        "already_posted_to": list(json.loads(burst.get("results") or "{}").keys()),
+    }

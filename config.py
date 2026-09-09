@@ -77,6 +77,10 @@ if X_ENABLED and not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECR
 # Публичный адрес на Railway без слэша в конце - по нему Threads качает медиа.
 PUBLIC_BASE_URL = _req("PUBLIC_BASE_URL").rstrip("/")
 
+# Секрет для ручных /admin-эндпоинтов (например, повторной публикации
+# старого поста на новую площадку). Пусто = эндпоинты отключены.
+ADMIN_TOKEN = _opt("ADMIN_TOKEN", "")
+
 # Каталог Railway Volume. Тут лежат и база, и скачанные медиафайлы.
 DATA_DIR = _opt("DATA_DIR", "/data")
 DB_PATH = _opt("DB_PATH", os.path.join(DATA_DIR, "app.db"))

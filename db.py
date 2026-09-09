@@ -271,6 +271,33 @@ def mark_posted(burst_id: str, threads_ids: list = None):
         _conn.commit()
 
 
+def get_burst(burst_id: str):
+    """Одна пачка по id — для ручного requeue из /admin."""
+    with _lock:
+        row = _conn.execute(
+            "SELECT * FROM bursts WHERE id = ?", (burst_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def requeue_burst(burst_id: str) -> bool:
+    """
+    Возвращает уже обработанную (posted/skipped/failed) пачку в очередь на
+    публикацию немедленно. Площадки, уже отмеченные в 'results', воркер не
+    трогает повторно — уйдёт только то, что ещё не публиковалось (например,
+    Instagram, включённый уже после того, как остальное было опубликовано).
+    """
+    now = time.time()
+    with _lock:
+        cur = _conn.execute(
+            "UPDATE bursts SET status = 'pending', publish_after = 0,"
+            " attempts = 0, error = NULL, updated_at = ? WHERE id = ?",
+            (now, burst_id),
+        )
+        _conn.commit()
+        return cur.rowcount > 0
+
+
 def reopen_burst(burst_id: str, publish_after: float):
     """
     Возвращает пачку в открытое состояние: манифест и картинки пришли,
