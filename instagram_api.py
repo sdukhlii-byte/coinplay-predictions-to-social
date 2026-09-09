@@ -4,6 +4,13 @@
 для Business/Creator аккаунта, связанного с Facebook-страницей. Личный аккаунт
 через API не постит — это ограничение Meta, не обходится кодом.
 
+Токен получен через Facebook Login (FB-страница + Graph API Explorer,
+токен вида "EAA..."), поэтому все запросы идут на graph.facebook.com — это
+тот же домен и тот же протокол, что и для обычных Facebook API-вызовов.
+(Отдельно у Meta есть флоу "Instagram API с прямым Instagram Login" с
+токенами вида "IGAA...", который ходит через graph.instagram.com — это
+другой продукт, в этом файле не используется.)
+
 Как и Threads, Instagram скачивает медиа сам по URL — файл напрямую не
 загружается. Поэтому картинки отдаются с нашего сервиса
 (PUBLIC_BASE_URL/media/{key}), ровно как уже сделано для Threads.
@@ -28,6 +35,8 @@ from config import (
     INSTAGRAM_CAPTION_LIMIT,
     INSTAGRAM_USER_ID,
     IG_GRAPH,
+    META_APP_ID,
+    META_APP_SECRET,
 )
 
 log = logging.getLogger("instagram")
@@ -181,9 +190,12 @@ def whoami() -> dict:
 def refresh_token_if_needed(min_days_left: int = 10) -> bool:
     """
     Продлевает long-lived токен, если осталось мало времени.
-    IG-токены Graph API продлеваются через fb_exchange (тот же механизм, что
-    у Facebook Login), поэтому здесь используется graph.facebook.com.
-    Работает только с токеном старше 24 часов.
+
+    Токен получен через Facebook Login (EAA...), поэтому продлевается тем же
+    механизмом, что и обычные Facebook-токены — fb_exchange_token на
+    graph.facebook.com. Для этого нужны данные приложения (META_APP_ID /
+    META_APP_SECRET), в отличие от нативных IG-Login токенов (IGAA...),
+    которые продлеваются по одному только текущему токену.
     """
     try:
         info = _get("debug_token", {"input_token": current_token()})
@@ -199,10 +211,23 @@ def refresh_token_if_needed(min_days_left: int = 10) -> bool:
     if days_left > min_days_left:
         return False
 
+    if not (META_APP_ID and META_APP_SECRET):
+        log.warning(
+            "IG-токену осталось %.1f дн., но META_APP_ID/META_APP_SECRET не "
+            "заданы — автопродление невозможно, обновите токен вручную",
+            days_left,
+        )
+        return False
+
     log.info("IG-токену осталось %.1f дн., продлеваю", days_left)
     r = requests.get(
-        f"{IG_GRAPH}/refresh_access_token",
-        params={"grant_type": "ig_refresh_token", "access_token": current_token()},
+        f"{IG_GRAPH}/oauth/access_token",
+        params={
+            "grant_type": "fb_exchange_token",
+            "client_id": META_APP_ID,
+            "client_secret": META_APP_SECRET,
+            "fb_exchange_token": current_token(),
+        },
         timeout=60,
     )
     if r.status_code >= 400:

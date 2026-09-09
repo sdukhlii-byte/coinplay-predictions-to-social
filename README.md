@@ -86,6 +86,8 @@
 | `INSTAGRAM_ENABLED` | `false` | публиковать в Instagram |
 | `INSTAGRAM_ACCESS_TOKEN` | — | long-lived токен IG (если Instagram включён) |
 | `INSTAGRAM_USER_ID` | — | id IG Business-аккаунта (если Instagram включён) |
+| `META_APP_ID` | — | App ID Meta-приложения (для автопродления IG-токена) |
+| `META_APP_SECRET` | — | App Secret Meta-приложения (для автопродления IG-токена) |
 | `INSTAGRAM_HASHTAGS` | пусто | свои хештеги в конец подписи IG |
 | `INSTAGRAM_SELECT_STRATEGY` | `longest` | какой вариант текста уходит в IG |
 | `X_ENABLED` | `false` | публиковать в X (Twitter) |
@@ -128,6 +130,22 @@ THREADS_HASHTAGS=#Coinplay
   пост не будет разрезан в тред из-за хвоста тегов
 
 ## Публикация в Instagram
+
+### Два разных способа подключения — не перепутать
+
+У Meta сейчас есть два отдельных продукта для программной публикации в
+Instagram, с разными доменами API и разным форматом токена:
+
+| | Instagram API через Facebook Login (наш случай) | Instagram API с прямым Instagram Login |
+|---|---|---|
+| Как получали токен | FB-страница → Graph API Explorer → `fb_exchange_token` | отдельный OAuth-флоу самого Instagram |
+| Формат токена | `EAA...` | `IGAA...` |
+| Домен API | `graph.facebook.com` | `graph.instagram.com` |
+| Продление | `fb_exchange_token` (нужны App ID/Secret) | `ig_refresh_token` (по одному токену) |
+
+Этот проект настроен под **первый вариант** (`IG_GRAPH` в `config.py` =
+`graph.facebook.com`). Если токен начинается на `IGAA` — это второй флоу,
+код под него не подходит без правки `instagram_api.py`.
 
 ### Требования (обойти нельзя — ограничения Meta)
 
@@ -184,6 +202,12 @@ THREADS_HASHTAGS=#Coinplay
 8. Выставить `INSTAGRAM_ENABLED=true`, задать `INSTAGRAM_ACCESS_TOKEN` и
    `INSTAGRAM_USER_ID`, передеплоить. В логах при старте появится
    `Instagram-аккаунт: @... (id ...)` — значит токен рабочий.
+9. Для автопродления токена (сервис делает это сам, когда остаётся меньше
+   10 дней) — дополнительно задать `META_APP_ID` (тот же App ID приложения,
+   например `1540362394439858`) и `META_APP_SECRET` (Настройки приложения →
+   Basic → App Secret → «Показать»). Без них при истечении токена в логах
+   будет предупреждение и токен придётся обновить вручную теми же curl-
+   командами из шагов 5-6.
 
 ### Лимиты Instagram API
 

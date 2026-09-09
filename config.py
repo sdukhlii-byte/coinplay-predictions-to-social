@@ -132,4 +132,14 @@ THREADS_GRAPH = "https://graph.threads.net/v1.0"
 
 # --- Константы Instagram API ---
 INSTAGRAM_CAPTION_LIMIT = 2200
-IG_GRAPH = "https://graph.instagram.com/v21.0"
+# Токен получен через Facebook Login (FB-страница + Graph API Explorer,
+# токен вида "EAA...") -> используем домен graph.facebook.com.
+# (Есть отдельный флоу "Instagram API с прямым Instagram Login" с токенами
+# вида "IGAA...", который ходит через graph.instagram.com — это НЕ наш
+# случай, не перепутать при повторной настройке в будущем.)
+IG_GRAPH = "https://graph.facebook.com/v21.0"
+
+# Для автопродления токена (fb_exchange_token) нужны данные приложения —
+# те же, что в Meta App: developers.facebook.com/apps/<APP_ID>/settings/basic/
+META_APP_ID = _opt("META_APP_ID")
+META_APP_SECRET = _opt("META_APP_SECRET")
