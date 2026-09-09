@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 import db
+import instagram_api
 import post_filter
 import telegram_source
 import threads_api
@@ -21,6 +22,7 @@ import worker
 import x_api
 from config import (
     DATA_DIR,
+    INSTAGRAM_ENABLED,
     MEDIA_DIR,
     POST_FILTER_PHRASE,
     SELECT_STRATEGY,
@@ -64,6 +66,16 @@ async def lifespan(app: FastAPI):
             log.error("Не удалось проверить токен Threads: %s", e)
     else:
         log.info("Threads отключён (THREADS_ENABLED=false)")
+
+    if INSTAGRAM_ENABLED:
+        try:
+            me = instagram_api.whoami()
+            log.info("Instagram-аккаунт: @%s (id %s)",
+                     me.get("username"), me.get("id"))
+        except Exception as e:
+            log.error("Не удалось проверить токен Instagram: %s", e)
+    else:
+        log.info("Instagram отключён (INSTAGRAM_ENABLED=false)")
 
     if X_ENABLED:
         try:

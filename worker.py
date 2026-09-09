@@ -9,6 +9,7 @@ import time
 
 import db
 import hashtags
+import instagram_api
 import post_filter
 import selector
 import telegram_source
@@ -17,6 +18,10 @@ import x_api
 from config import (
     ALLOW_EMPTY_TEXT,
     BURST_WAIT_SECONDS,
+    INSTAGRAM_CAPTION_LIMIT,
+    INSTAGRAM_ENABLED,
+    INSTAGRAM_HASHTAGS,
+    INSTAGRAM_SELECT_STRATEGY,
     MAX_ATTEMPTS,
     SELECT_STRATEGY,
     STRIP_HASHTAGS,
@@ -78,6 +83,31 @@ def _publish_threads(burst: dict, candidates: list) -> list:
     return threads_api.publish(text, media)
 
 
+def _publish_instagram(burst: dict, candidates: list) -> list:
+    chosen = selector.choose(
+        burst.get("manifest", ""), candidates, INSTAGRAM_SELECT_STRATEGY
+    )
+    if not chosen:
+        return None
+
+    text = _clean_text(chosen.get("text", ""))
+    text = hashtags.append(text, INSTAGRAM_HASHTAGS, INSTAGRAM_CAPTION_LIMIT)
+    media_entries = _resolve_media(chosen)
+
+    media = [
+        {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
+        for m in media_entries
+    ]
+    # Instagram, в отличие от Threads/X, не публикует пост без медиа.
+    if not media:
+        log.info("IG: у пачки %s нет медиа — пропускаю площадку", burst["id"][:8])
+        return None
+
+    log.info("Instagram: публикую msg %s, медиа %d",
+             chosen.get("message_id"), len(media))
+    return instagram_api.publish(text, media)
+
+
 def _publish_x(burst: dict, candidates: list) -> list:
     chosen = selector.choose(burst.get("manifest", ""), candidates, X_SELECT_STRATEGY)
     if not chosen:
@@ -128,6 +158,8 @@ def _resolve_media(chosen: dict) -> list:
 PUBLISHERS = []
 if THREADS_ENABLED:
     PUBLISHERS.append(("threads", _publish_threads))
+if INSTAGRAM_ENABLED:
+    PUBLISHERS.append(("instagram", _publish_instagram))
 if X_ENABLED:
     PUBLISHERS.append(("x", _publish_x))
 
@@ -225,12 +257,18 @@ def _tick():
 
     now = time.time()
 
-    if THREADS_ENABLED and now - _last_token_check > TOKEN_CHECK_INTERVAL:
+    if now - _last_token_check > TOKEN_CHECK_INTERVAL:
         _last_token_check = now
-        try:
-            threads_api.refresh_token_if_needed()
-        except Exception as e:
-            log.warning("Проверка токена не удалась: %s", e)
+        if THREADS_ENABLED:
+            try:
+                threads_api.refresh_token_if_needed()
+            except Exception as e:
+                log.warning("Проверка токена Threads не удалась: %s", e)
+        if INSTAGRAM_ENABLED:
+            try:
+                instagram_api.refresh_token_if_needed()
+            except Exception as e:
+                log.warning("Проверка токена Instagram не удалась: %s", e)
 
     if now - _last_cleanup > 6 * 3600:
         _last_cleanup = now

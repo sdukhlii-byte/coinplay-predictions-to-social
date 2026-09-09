@@ -1,7 +1,8 @@
-# Telegram-группа → Threads и X: автопостинг
+# Telegram-группа → Threads, Instagram и X: автопостинг
 
 Читает группу, отбирает нужные посты по фразе-маркеру, схлопывает варианты
-одного материала в один пост и публикует в Threads и/или X (Twitter).
+одного материала в один пост и публикует в Threads, Instagram и/или X (Twitter).
+Каждая площадка включается своим флагом (`*_ENABLED`) и работает независимо.
 
 ## Почему юзер-сессия, а не бот
 
@@ -82,6 +83,11 @@
 | `SELECT_STRATEGY` | `longest` | какой вариант публиковать: `longest`/`first`/`last` |
 | `MANIFEST_TYPES` | пусто | публиковать только эти типы манифеста, через запятую |
 | `THREADS_ENABLED` | `true` | публиковать в Threads |
+| `INSTAGRAM_ENABLED` | `false` | публиковать в Instagram |
+| `INSTAGRAM_ACCESS_TOKEN` | — | long-lived токен IG (если Instagram включён) |
+| `INSTAGRAM_USER_ID` | — | id IG Business-аккаунта (если Instagram включён) |
+| `INSTAGRAM_HASHTAGS` | пусто | свои хештеги в конец подписи IG |
+| `INSTAGRAM_SELECT_STRATEGY` | `longest` | какой вариант текста уходит в IG |
 | `X_ENABLED` | `false` | публиковать в X (Twitter) |
 | `X_API_KEY` / `X_API_SECRET` | — | Consumer Keys из X Developer Portal |
 | `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | — | Access Token с правами Read and write |
@@ -121,6 +127,72 @@ THREADS_HASHTAGS=#Coinplay
 - Учитывается лимит символов: влезет столько тегов, сколько поместится,
   пост не будет разрезан в тред из-за хвоста тегов
 
+## Публикация в Instagram
+
+### Требования (обойти нельзя — ограничения Meta)
+
+- Аккаунт Instagram должен быть **Business или Creator**.
+- Он должен быть **связан с Facebook-страницей**. Страница может быть пустой
+  (ноль постов, ноль подписчиков) — она нужна только технически, чтобы на
+  связку «страница ↔ IG» выпустить токен. Личный IG через API не постит.
+- Instagram скачивает картинки **по URL сам** (как Threads), поэтому сервис
+  должен быть публично доступен (`PUBLIC_BASE_URL`) — у нас уже так.
+- Пост **обязан** содержать хотя бы одну картинку/видео: пост из одного
+  текста IG API не принимает (в отличие от Threads/X). Наш `01-picks.png` +
+  `02-analysis.png` уходят каруселью.
+
+### Получение токена с нуля (один раз, ~15 минут)
+
+1. **Facebook-страница.** Если нет — создать любую пустую:
+   facebook.com → Pages → Create.
+2. **Связать IG с этой страницей.** В приложении Instagram: Settings →
+   Accounts Center → добавить/подтвердить, что IG-аккаунт и FB-страница в
+   одном Accounts Center. Убедиться, что IG переключён в Business/Creator
+   (Settings → Account type and tools → Switch to professional account).
+3. **Meta App.** developers.facebook.com → My Apps → **Create App** →
+   тип **Business**. В приложение добавить продукт **Instagram Graph API**
+   (или «Instagram» → «Instagram API setup with Facebook Login»).
+4. **Права.** В настройках приложения запросить разрешения:
+   `instagram_basic`, `instagram_content_publish`, `pages_show_list`,
+   `pages_read_engagement`. Для своего же аккаунта их можно использовать в
+   режиме разработки/через Graph API Explorer без полного App Review, если
+   аккаунт добавлен как роль в приложении.
+5. **Токен.** developers.facebook.com → Tools → **Graph API Explorer**:
+   выбрать своё приложение, выбрать нужную FB-страницу, отметить права из
+   п.4, «Generate Access Token». Получится short-lived токен.
+6. **Long-lived токен.** Обменять short-lived на long-lived (~60 дней):
+   ```bash
+   curl -G "https://graph.facebook.com/v21.0/oauth/access_token" \
+     --data-urlencode "grant_type=fb_exchange_token" \
+     --data-urlencode "client_id=<APP_ID>" \
+     --data-urlencode "client_secret=<APP_SECRET>" \
+     --data-urlencode "fb_exchange_token=<SHORT_LIVED_TOKEN>"
+   ```
+   Результат → в `INSTAGRAM_ACCESS_TOKEN`. Сервис сам продлевает его, когда
+   остаётся меньше 10 дней.
+7. **IG User ID.** Узнать id Business-аккаунта:
+   ```bash
+   # id страницы
+   curl -G "https://graph.facebook.com/v21.0/me/accounts" \
+     --data-urlencode "access_token=<LONG_LIVED_TOKEN>"
+   # instagram_business_account этой страницы
+   curl -G "https://graph.facebook.com/v21.0/<PAGE_ID>" \
+     --data-urlencode "fields=instagram_business_account" \
+     --data-urlencode "access_token=<LONG_LIVED_TOKEN>"
+   ```
+   Значение `instagram_business_account.id` → в `INSTAGRAM_USER_ID`.
+8. Выставить `INSTAGRAM_ENABLED=true`, задать `INSTAGRAM_ACCESS_TOKEN` и
+   `INSTAGRAM_USER_ID`, передеплоить. В логах при старте появится
+   `Instagram-аккаунт: @... (id ...)` — значит токен рабочий.
+
+### Лимиты Instagram API
+
+- ~25 публикаций в сутки на аккаунт (rolling 24 ч).
+- Подпись до 2200 символов (длиннее — ужимается, тредов у IG нет).
+- Карусель: 2-10 элементов.
+- Изображения — JPEG (PNG обычно проходят, но при проблемах с публикацией
+  первым делом проверить формат картинок генератора).
+
 ## Публикация в X (Twitter)
 
 ### Ключи
@@ -144,17 +216,19 @@ X Developer Portal → проект → **Keys and tokens**:
 
 При 10 постах в день выходит примерно $4-5 в месяц.
 
-### Отличия от Threads
+### Отличия площадок
 
-| | Threads | X |
-|---|---|---|
-| Лимит текста | 500 | 280 |
-| Вложений | до 20 | до 4 |
-| Как получает медиа | качает по URL с нашего сервиса | файл загружается напрямую |
-| Стратегия текста | `longest` | `shortest` |
+| | Threads | Instagram | X |
+|---|---|---|---|
+| Лимит текста | 500 | 2200 | 280 |
+| Вложений | до 20 | 2-10 | до 4 |
+| Пост без медиа | можно | **нельзя** | можно |
+| Как получает медиа | качает по URL | качает по URL | файл напрямую |
+| Стратегия текста | `longest` | `longest` | `shortest` |
 
-Площадки публикуются независимо: если одна упала, вторая всё равно
-отработает, а при повторной попытке успешная не будет продублирована.
+Площадки публикуются независимо: если одна упала, остальные всё равно
+отработают, а при повторной попытке успешная не будет продублирована
+(состояние по каждой площадке хранится отдельно в `results`).
 | `WORKER_INTERVAL_SECONDS` | `10` | интервал воркера |
 | `MAX_ATTEMPTS` | `5` | попыток публикации до статуса `failed` |
 | `ALLOW_EMPTY_TEXT` | `true` | публиковать посты без текста |

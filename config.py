@@ -34,6 +34,24 @@ if THREADS_ENABLED and not (THREADS_ACCESS_TOKEN and THREADS_USER_ID):
         "THREADS_ENABLED=true, но не заданы THREADS_ACCESS_TOKEN / THREADS_USER_ID"
     )
 
+# --- Instagram ---
+# Публикация возможна только с Business/Creator аккаунта, связанного с
+# Facebook-страницей. Токен и user_id берутся из Meta App с правом
+# instagram_content_publish (см. README).
+INSTAGRAM_ENABLED = _opt("INSTAGRAM_ENABLED", "false").lower() == "true"
+INSTAGRAM_ACCESS_TOKEN = _opt("INSTAGRAM_ACCESS_TOKEN")
+INSTAGRAM_USER_ID = _opt("INSTAGRAM_USER_ID")
+INSTAGRAM_HASHTAGS = _opt("INSTAGRAM_HASHTAGS", "")
+# Какой вариант текста уходит в IG. Лимит подписи большой (2200), поэтому
+# по умолчанию берётся длинный вариант, как у Threads.
+INSTAGRAM_SELECT_STRATEGY = _opt("INSTAGRAM_SELECT_STRATEGY", "longest").lower()
+
+if INSTAGRAM_ENABLED and not (INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID):
+    raise RuntimeError(
+        "INSTAGRAM_ENABLED=true, но не заданы "
+        "INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_USER_ID"
+    )
+
 # --- X (Twitter) ---
 # OAuth 1.0a user context: ключи приложения + токены доступа своего аккаунта.
 # Берутся в X Developer Portal -> Keys and tokens.
@@ -111,3 +129,7 @@ X_HASHTAGS = _opt("X_HASHTAGS", "")
 # --- Константы Threads API ---
 THREADS_TEXT_LIMIT = 500
 THREADS_GRAPH = "https://graph.threads.net/v1.0"
+
+# --- Константы Instagram API ---
+INSTAGRAM_CAPTION_LIMIT = 2200
+IG_GRAPH = "https://graph.instagram.com/v21.0"
