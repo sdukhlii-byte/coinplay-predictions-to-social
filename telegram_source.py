@@ -21,7 +21,7 @@ from config import (
     BURST_WINDOW_SECONDS,
     MEDIA_DIR,
     PUBLIC_BASE_URL,
-    SOURCE_CHAT_ID,
+    SOURCE_CHAT_IDS,
     TELEGRAM_API_HASH,
     TELEGRAM_API_ID,
     TELEGRAM_STRING_SESSION,
@@ -110,7 +110,7 @@ async def _handle(event):
     message = event.message
     chat_id = event.chat_id
 
-    if chat_id != SOURCE_CHAT_ID:
+    if chat_id not in SOURCE_CHAT_IDS:
         return
 
     if not db.mark_seen(chat_id, message.id):
@@ -178,6 +178,12 @@ async def fetch_by_links(links: list) -> list:
     Запасной путь: скачать картинки по ссылкам вида https://t.me/c/<chat>/<msg>
     из манифеста. Нужен, если сами файлы почему-то не долетели
     отдельными сообщениями (например, сервис стартовал позже).
+
+    chat_part из ссылки — это внутренний id чата без префикса -100 (формат
+    t.me/c/<internal_id>/<msg_id>). Раньше тут всегда использовался
+    SOURCE_CHAT_ID напрямую — с одним источником это случайно совпадало,
+    с несколькими источниками манифест из чата B тянул бы картинку из
+    чата A. Теперь чат восстанавливается из самой ссылки.
     """
     if not _client:
         return []
@@ -185,7 +191,8 @@ async def fetch_by_links(links: list) -> list:
     out = []
     for chat_part, msg_id in links:
         try:
-            message = await _client.get_messages(SOURCE_CHAT_ID, ids=int(msg_id))
+            chat_id = int(f"-100{chat_part}")
+            message = await _client.get_messages(chat_id, ids=int(msg_id))
             if not message:
                 continue
             saved = await _save_media(message)
@@ -217,17 +224,18 @@ async def start():
         TELEGRAM_API_ID,
         TELEGRAM_API_HASH,
     )
-    _client.add_event_handler(_handle, events.NewMessage(chats=SOURCE_CHAT_ID))
+    _client.add_event_handler(_handle, events.NewMessage(chats=SOURCE_CHAT_IDS))
 
     await _client.start()
     me = await _client.get_me()
     log.info("Подключён как %s (id %s)", me.username or me.first_name, me.id)
 
-    try:
-        entity = await _client.get_entity(SOURCE_CHAT_ID)
-        log.info("Слушаю источник: %s", getattr(entity, "title", SOURCE_CHAT_ID))
-    except Exception as e:
-        log.error("Не удалось получить чат %s: %s", SOURCE_CHAT_ID, e)
+    for chat_id in SOURCE_CHAT_IDS:
+        try:
+            entity = await _client.get_entity(chat_id)
+            log.info("Слушаю источник: %s (%s)", getattr(entity, "title", chat_id), chat_id)
+        except Exception as e:
+            log.error("Не удалось получить чат %s: %s", chat_id, e)
 
     asyncio.create_task(_client.run_until_disconnected())
 

@@ -21,8 +21,15 @@ TELEGRAM_API_ID = int(_req("TELEGRAM_API_ID"))
 TELEGRAM_API_HASH = _req("TELEGRAM_API_HASH")
 # Строка сессии, получается один раз локально через gen_session.py
 TELEGRAM_STRING_SESSION = _req("TELEGRAM_STRING_SESSION")
-# ID группы-источника, например -1001234567890
-SOURCE_CHAT_ID = int(_req("SOURCE_CHAT_ID"))
+# ID групп-источников, например -1001234567890
+# Можно указать несколько через запятую: "-1001234567890,-1009876543210" —
+# слушатель подпишется на все сразу, паблишеру источник не важен (он видит
+# только манифест и медиа, не то, из какого чата они пришли).
+SOURCE_CHAT_IDS = [int(x.strip()) for x in _req("SOURCE_CHAT_ID").split(",") if x.strip()]
+# Старое имя оставлено ради обратной совместимости кода, который может его
+# импортировать напрямую (например, ручные /admin-скрипты) — всегда первый
+# из списка, только для этого случая.
+SOURCE_CHAT_ID = SOURCE_CHAT_IDS[0]
 
 # --- Threads ---
 THREADS_ENABLED = _opt("THREADS_ENABLED", "true").lower() == "true"
