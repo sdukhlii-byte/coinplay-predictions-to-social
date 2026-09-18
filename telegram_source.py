@@ -350,6 +350,17 @@ async def start():
     me = await _client.get_me()
     log.info("Подключён как %s (id %s)", me.username or me.first_name, me.id)
 
+    # Недавно добавленные чаты (только что вступили) Telethon ещё не закэшировал
+    # локально — без этого get_entity(id) падает с "Could not find the input
+    # entity", хотя сами сообщения из чата всё равно долетают и обрабатываются
+    # штатно (роутинг в _handle идёт по голому числовому id). Обновление списка
+    # диалогов нужно только для того, чтобы эта диагностика ниже не шумела в
+    # логах ошибкой на старте.
+    try:
+        await _client.get_dialogs()
+    except Exception as e:
+        log.warning("Не удалось обновить список диалогов: %s", e)
+
     for chat_id in SOURCE_CHAT_IDS:
         try:
             entity = await _client.get_entity(chat_id)
