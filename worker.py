@@ -60,15 +60,9 @@ def _clean_text(text: str) -> str:
     return text
 
 
-def _publish_threads(burst: dict, candidates: list) -> list:
-    chosen = selector.choose(burst.get("manifest", ""), candidates, SELECT_STRATEGY)
-    if not chosen:
-        return None
-
-    text = _clean_text(chosen.get("text", ""))
+def _finalize_threads(text: str, media_entries: list):
+    text = _clean_text(text)
     text = hashtags.append(text, THREADS_HASHTAGS, THREADS_TEXT_LIMIT)
-    media_entries = _resolve_media(chosen)
-
     media = [
         {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
         for m in media_entries
@@ -77,43 +71,27 @@ def _publish_threads(burst: dict, candidates: list) -> list:
         return None
     if not text and not ALLOW_EMPTY_TEXT:
         return None
-
-    log.info("Threads: публикую msg %s, медиа %d",
-             chosen.get("message_id"), len(media))
+    log.info("Threads: публикую, медиа %d", len(media))
     return threads_api.publish(text, media)
 
 
-def _publish_instagram(burst: dict, candidates: list) -> list:
-    chosen = selector.choose(
-        burst.get("manifest", ""), candidates, INSTAGRAM_SELECT_STRATEGY
-    )
-    if not chosen:
-        return None
-
-    text = _clean_text(chosen.get("text", ""))
+def _finalize_instagram(text: str, media_entries: list):
+    text = _clean_text(text)
     text = hashtags.append(text, INSTAGRAM_HASHTAGS, INSTAGRAM_CAPTION_LIMIT)
-    media_entries = _resolve_media(chosen)
-
     media = [
         {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
         for m in media_entries
     ]
     # Instagram, в отличие от Threads/X, не публикует пост без медиа.
     if not media:
-        log.info("IG: у пачки %s нет медиа — пропускаю площадку", burst["id"][:8])
+        log.info("IG: нет медиа — пропускаю площадку")
         return None
-
-    log.info("Instagram: публикую msg %s, медиа %d — %s",
-             chosen.get("message_id"), len(media), [m["url"] for m in media])
+    log.info("Instagram: публикую, медиа %d — %s", len(media), [m["url"] for m in media])
     return instagram_api.publish(text, media)
 
 
-def _publish_x(burst: dict, candidates: list) -> list:
-    chosen = selector.choose(burst.get("manifest", ""), candidates, X_SELECT_STRATEGY)
-    if not chosen:
-        return None
-
-    text = _clean_text(chosen.get("text", ""))
+def _finalize_x(text: str, media_entries: list):
+    text = _clean_text(text)
 
     # Резервируем место под хештеги, иначе они не влезут после сжатия.
     tags = hashtags.parse(X_HASHTAGS)
@@ -128,16 +106,50 @@ def _publish_x(burst: dict, candidates: list) -> list:
         text = x_api.fit(text, X_TEXT_LIMIT - reserve)
 
     text = hashtags.append(text, X_HASHTAGS, X_TEXT_LIMIT)
-    media_entries = _resolve_media(chosen)
 
     if not text and not media_entries:
         return None
     if not text and not ALLOW_EMPTY_TEXT:
         return None
 
-    log.info("X: публикую msg %s (%d симв.), медиа %d",
-             chosen.get("message_id"), len(text), len(media_entries))
+    log.info("X: публикую (%d симв.), медиа %d", len(text), len(media_entries))
     return x_api.publish(text, media_entries)
+
+
+FINALIZERS = {
+    "threads": _finalize_threads,
+    "instagram": _finalize_instagram,
+    "x": _finalize_x,
+}
+
+
+def _publish_threads(burst: dict, candidates: list) -> list:
+    chosen = selector.choose(burst.get("manifest", ""), candidates, SELECT_STRATEGY)
+    if not chosen:
+        return None
+    text = chosen.get("text", "")
+    media_entries = _resolve_media(chosen)
+    return _finalize_threads(text, media_entries)
+
+
+def _publish_instagram(burst: dict, candidates: list) -> list:
+    chosen = selector.choose(
+        burst.get("manifest", ""), candidates, INSTAGRAM_SELECT_STRATEGY
+    )
+    if not chosen:
+        return None
+    text = chosen.get("text", "")
+    media_entries = _resolve_media(chosen)
+    return _finalize_instagram(text, media_entries)
+
+
+def _publish_x(burst: dict, candidates: list) -> list:
+    chosen = selector.choose(burst.get("manifest", ""), candidates, X_SELECT_STRATEGY)
+    if not chosen:
+        return None
+    text = chosen.get("text", "")
+    media_entries = _resolve_media(chosen)
+    return _finalize_x(text, media_entries)
 
 
 def _resolve_media(chosen: dict) -> list:
@@ -171,7 +183,66 @@ def _has_publishable_text(candidates: list) -> bool:
     )
 
 
+def _process_zip_burst(burst: dict):
+    """
+    Пачка из готового zip-набора: текст и картинки уже разложены по площадкам
+    в kit.json, выбирать вариант (как для старого формата) не нужно —
+    публикуем то, что есть, сразу.
+    """
+    try:
+        kit = json.loads(burst.get("kit") or "{}")
+    except Exception as e:
+        db.mark_skipped(burst["id"], f"не смог прочитать kit: {e}")
+        return
+
+    platforms = kit.get("platforms", {})
+
+    if not PUBLISHERS:
+        db.mark_skipped(burst["id"], "не включена ни одна площадка")
+        return
+
+    done = db.get_results(burst["id"])
+    pending = [(name, fn) for name, fn in PUBLISHERS if name not in done]
+
+    if not pending:
+        db.mark_posted(burst["id"], done.get("threads", []))
+        return
+
+    errors = []
+    for name, _legacy_fn in pending:
+        plat = platforms.get(name)
+        if not plat:
+            log.info("Пачка %s: в zip нет варианта для %s — пропускаю площадку",
+                      burst["id"][:8], name)
+            continue
+        try:
+            ids = FINALIZERS[name](plat.get("text", ""), plat.get("media", []))
+            if ids is None:
+                continue
+            db.save_result(burst["id"], name, ids)
+            log.info("%s: опубликовано %s", name, ids)
+        except Exception as e:
+            log.error("%s: ошибка публикации — %s", name, e)
+            errors.append(f"{name}: {e}")
+
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+    results = db.get_results(burst["id"])
+    if not results:
+        log.info("Пачка %s: публиковать нечего (ни одна площадка не совпала с kit)",
+                  burst["id"][:8])
+        db.mark_skipped(burst["id"], "ни одна включённая площадка не нашлась в zip")
+        return
+
+    db.mark_posted(burst["id"], results.get("threads", []))
+
+
 def _process_burst(burst: dict):
+    if burst.get("kit"):
+        _process_zip_burst(burst)
+        return
+
     candidates = json.loads(burst["candidates"] or "[]")
 
     if not PUBLISHERS:

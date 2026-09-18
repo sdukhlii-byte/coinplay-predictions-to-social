@@ -5,10 +5,12 @@
 """
 
 import asyncio
+import json
 import logging
 import mimetypes
 import os
 import uuid
+import zipfile
 
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -52,6 +54,120 @@ def _kind_of(message) -> str:
         if mime.startswith("video/"):
             return "video"
     return ""
+
+
+def _is_zip(message) -> bool:
+    """
+    Готовый набор для соцсетей (kit.json + картинки + тексты по площадкам),
+    в отличие от старого формата, приходит одним zip-документом, а не
+    отдельными сообщениями с манифестом. Определяем по mime/имени файла.
+    """
+    doc = getattr(message, "document", None)
+    if not doc:
+        return False
+    mime = getattr(doc, "mime_type", "") or ""
+    if mime in ("application/zip", "application/x-zip-compressed"):
+        return True
+    try:
+        if message.file and message.file.name:
+            return message.file.name.lower().endswith(".zip")
+    except Exception:
+        pass
+    return False
+
+
+async def _handle_zip(message, chat_id: int) -> None:
+    """
+    Распаковывает готовый набор из zip (kit.json + картинки + тексты по
+    площадкам) и сразу ставит пачку в очередь на публикацию — в отличие от
+    старого формата (манифест + отдельные фото), тут ждать нечего: всё уже
+    собрано целиком внутри архива.
+    """
+    tmp_dir = os.path.join(MEDIA_DIR, "kits", uuid.uuid4().hex)
+    try:
+        os.makedirs(tmp_dir, exist_ok=True)
+    except Exception as e:
+        log.error("msg %s: не могу создать каталог %s: %s", message.id, tmp_dir, e)
+        return
+
+    zip_path = os.path.join(tmp_dir, "kit.zip")
+    try:
+        await message.download_media(file=zip_path)
+    except Exception as e:
+        log.error("msg %s: не удалось скачать zip: %s", message.id, e)
+        return
+
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp_dir)
+    except Exception as e:
+        log.error("msg %s: не смог распаковать zip: %s", message.id, e)
+        return
+    finally:
+        try:
+            os.remove(zip_path)
+        except Exception:
+            pass
+
+    kit_path = os.path.join(tmp_dir, "kit.json")
+    if not os.path.exists(kit_path):
+        log.warning("msg %s: в zip нет kit.json — пропускаю", message.id)
+        return
+
+    try:
+        with open(kit_path, encoding="utf-8") as f:
+            kit_raw = json.load(f)
+    except Exception as e:
+        log.error("msg %s: не смог прочитать kit.json: %s", message.id, e)
+        return
+
+    platforms_out = {}
+    for name, spec in (kit_raw.get("platforms") or {}).items():
+        text = ""
+        text_file = spec.get("text_file")
+        if text_file:
+            text_path = os.path.join(tmp_dir, name, text_file)
+            if os.path.exists(text_path):
+                try:
+                    with open(text_path, encoding="utf-8") as f:
+                        text = f.read().strip()
+                except Exception as e:
+                    log.warning("msg %s: не смог прочитать %s: %s", message.id, text_path, e)
+
+        media = []
+        for img_name in (spec.get("images") or []):
+            img_path = os.path.join(tmp_dir, name, img_name)
+            if not os.path.exists(img_path):
+                log.warning("msg %s: в архиве нет %s/%s из манифеста",
+                            message.id, name, img_name)
+                continue
+            mime = mimetypes.guess_type(img_path)[0] or "image/png"
+            key = db.register_media(img_path, "image", mime)
+            media.append({"kind": "image", "key": key, "filename": img_name})
+
+        if text or media:
+            platforms_out[name] = {"text": text, "media": media}
+
+    if not platforms_out:
+        log.warning("msg %s: zip не дал ни одной готовой площадки — пропускаю", message.id)
+        return
+
+    team_a = kit_raw.get("team_a")
+    team_b = kit_raw.get("team_b")
+    if team_a and team_b:
+        title = f"{team_a} vs {team_b}"
+    else:
+        caption = (message.text or message.message or "").strip()
+        title = caption.splitlines()[0][:80] if caption else "без названия"
+
+    burst_id = db.start_zip_burst(
+        chat_id, f"zipkit · {title}",
+        {"match_id": kit_raw.get("match_id"), "platforms": platforms_out},
+    )
+    log.info(
+        "msg %s — zip-набор %r: готово %d площадок(и) -> пачка %s, публикую без ожидания",
+        message.id, title, len(platforms_out), burst_id[:8],
+    )
 
 
 async def _save_media(message) -> list:
@@ -114,6 +230,10 @@ async def _handle(event):
         return
 
     if not db.mark_seen(chat_id, message.id):
+        return
+
+    if _is_zip(message):
+        await _handle_zip(message, chat_id)
         return
 
     text = (message.text or message.message or "").strip()
