@@ -17,11 +17,11 @@ CREATE TABLE IF NOT EXISTS bursts (
     chat_id       INTEGER NOT NULL,
     manifest      TEXT NOT NULL DEFAULT '',
     candidates    TEXT NOT NULL DEFAULT '[]',
-    kit           TEXT,
     status        TEXT NOT NULL DEFAULT 'open',
     attempts      INTEGER NOT NULL DEFAULT 0,
     error         TEXT,
     threads_ids   TEXT,
+    kit           TEXT,
     results       TEXT NOT NULL DEFAULT '{}',
     publish_after REAL NOT NULL DEFAULT 0,
     last_msg_at   REAL NOT NULL,
@@ -157,26 +157,6 @@ def start_burst(chat_id: int, manifest: str, burst_wait: float) -> str:
     return burst_id
 
 
-def start_zip_burst(chat_id: int, header: str, kit_payload: dict) -> str:
-    """
-    Открывает пачку из готового zip-набора (kit.json + картинки + тексты по
-    площадкам уже разложены заранее). В отличие от start_burst(), тут нечего
-    ждать — весь пост уже собран целиком, поэтому publish_after=сейчас и
-    статус сразу 'pending': воркер заберёт её в ближайший тик.
-    """
-    now = time.time()
-    burst_id = uuid.uuid4().hex
-    with _lock:
-        _conn.execute(
-            "INSERT INTO bursts (id, chat_id, manifest, candidates, kit, status,"
-            " publish_after, last_msg_at, created_at, updated_at)"
-            " VALUES (?, ?, ?, '[]', ?, 'pending', ?, ?, ?, ?)",
-            (burst_id, chat_id, header, json.dumps(kit_payload), now, now, now, now),
-        )
-        _conn.commit()
-    return burst_id
-
-
 def add_candidate(chat_id: int, candidate: dict, burst_window: float,
                   burst_wait: float, grouped_id=None) -> str:
     """
@@ -226,6 +206,26 @@ def add_candidate(chat_id: int, candidate: dict, burst_window: float,
         )
         _conn.commit()
         return burst_id
+
+
+def start_zip_burst(chat_id: int, header: str, kit_payload: dict) -> str:
+    """
+    Открывает пачку из готового zip-набора (kit.json + картинки + тексты по
+    площадкам уже разложены заранее). В отличие от start_burst(), тут нечего
+    ждать — весь пост уже собран целиком, поэтому publish_after=сейчас и
+    статус сразу 'pending': воркер заберёт её в ближайший тик.
+    """
+    now = time.time()
+    burst_id = uuid.uuid4().hex
+    with _lock:
+        _conn.execute(
+            "INSERT INTO bursts (id, chat_id, manifest, candidates, kit, status,"
+            " publish_after, last_msg_at, created_at, updated_at)"
+            " VALUES (?, ?, ?, '[]', ?, 'pending', ?, ?, ?, ?)",
+            (burst_id, chat_id, header, json.dumps(kit_payload), now, now, now, now),
+        )
+        _conn.commit()
+    return burst_id
 
 
 def claim_ready_bursts(limit: int = 5) -> list:
@@ -383,33 +383,34 @@ def stats() -> dict:
 def recent_bursts(limit: int = 20) -> list:
     with _lock:
         rows = _conn.execute(
-            "SELECT id, status, attempts, error, candidates, results, manifest, kit,"
-            " created_at FROM bursts ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, status, attempts, error, candidates, results, manifest,"
+            " kit, created_at FROM bursts ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
     out = []
     for r in rows:
         d = dict(r)
         cands = json.loads(d.pop("candidates") or "[]")
-        kit_raw = d.pop("kit", None)
         try:
             d["results"] = json.loads(d.get("results") or "{}")
         except Exception:
             d["results"] = {}
         manifest = d.pop("manifest", "") or ""
-        d["title"] = manifest.splitlines()[0][:80] if manifest else ""
-
+        kit_raw = d.pop("kit", None)
+        kit = None
         if kit_raw:
             try:
                 kit = json.loads(kit_raw)
-                platforms = kit.get("platforms", {})
-                first = next(iter(platforms.values()), {})
-                d["variants"] = len(platforms)
-                d["preview"] = (first.get("text", "") or "")[:80]
             except Exception:
-                d["variants"] = 0
-                d["preview"] = ""
+                kit = None
+        if kit:
+            d["title"] = manifest.splitlines()[0][:80] if manifest else "zip-набор"
+            platforms = kit.get("platforms") or {}
+            d["variants"] = len(platforms)
+            first = next(iter(platforms.values()), {})
+            d["preview"] = (first.get("text", "")[:80] if first else "")
         else:
+            d["title"] = manifest.splitlines()[0][:80] if manifest else ""
             d["variants"] = len(cands)
             d["preview"] = (cands[0].get("text", "")[:80] if cands else "")
         out.append(d)

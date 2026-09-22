@@ -60,8 +60,30 @@ def _clean_text(text: str) -> str:
     return text
 
 
+# Голый URL в тексте Threads/Instagram не становится кликабельной ссылкой —
+# вместо этого Threads цепляет к нему карточку-превью, и если текст из-за
+# этого не влезает в лимит и уходит "связанным тредом" (см. threads_api.
+# split_text), превью-карточка оказывается на отдельном посте вида "(2/2)".
+# Источник в части постов (например, UFC-кит) пишет реальную ссылку вместо
+# принятого у остальных "Link in bio" — из-за этого одни посты расползаются
+# на два, а другие (без ссылки в тексте) публикуются одним постом.
+_URL_RE = re.compile(r"(?:https?://\S+|www\.\S+|\b[a-zA-Z0-9][\w-]*\.[a-zA-Z]{2,6}/\S+)")
+
+
+def _strip_links(text: str) -> str:
+    """Заменяет сырые ссылки в тексте на тот же 'Link in bio', что и так пишет источник."""
+    new_text, n = _URL_RE.subn("Link in bio", text)
+    if not n:
+        return text
+    new_text = re.sub(r"(Link in bio)(?:[ \t]*\n?[ \t]*\1)+", r"\1", new_text)
+    new_text = re.sub(r"[ \t]{2,}", " ", new_text)
+    new_text = re.sub(r"\n{3,}", "\n\n", new_text).strip()
+    return new_text
+
+
 def _finalize_threads(text: str, media_entries: list):
     text = _clean_text(text)
+    text = _strip_links(text)
     text = hashtags.append(text, THREADS_HASHTAGS, THREADS_TEXT_LIMIT)
     media = [
         {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
@@ -84,7 +106,7 @@ def _finalize_instagram(text: str, media_entries: list):
     ]
     # Instagram, в отличие от Threads/X, не публикует пост без медиа.
     if not media:
-        log.info("IG: нет медиа — пропускаю площадку")
+        log.info("IG: у пачки нет медиа — пропускаю площадку")
         return None
     log.info("Instagram: публикую, медиа %d — %s", len(media), [m["url"] for m in media])
     return instagram_api.publish(text, media)
@@ -116,20 +138,17 @@ def _finalize_x(text: str, media_entries: list):
     return x_api.publish(text, media_entries)
 
 
-FINALIZERS = {
-    "threads": _finalize_threads,
-    "instagram": _finalize_instagram,
-    "x": _finalize_x,
-}
+FINALIZERS = {"threads": _finalize_threads, "instagram": _finalize_instagram, "x": _finalize_x}
 
 
 def _publish_threads(burst: dict, candidates: list) -> list:
     chosen = selector.choose(burst.get("manifest", ""), candidates, SELECT_STRATEGY)
     if not chosen:
         return None
-    text = chosen.get("text", "")
     media_entries = _resolve_media(chosen)
-    return _finalize_threads(text, media_entries)
+    log.info("Threads: публикую msg %s, медиа %d",
+             chosen.get("message_id"), len(media_entries))
+    return _finalize_threads(chosen.get("text", ""), media_entries)
 
 
 def _publish_instagram(burst: dict, candidates: list) -> list:
@@ -138,18 +157,20 @@ def _publish_instagram(burst: dict, candidates: list) -> list:
     )
     if not chosen:
         return None
-    text = chosen.get("text", "")
     media_entries = _resolve_media(chosen)
-    return _finalize_instagram(text, media_entries)
+    log.info("Instagram: публикую msg %s, медиа %d",
+             chosen.get("message_id"), len(media_entries))
+    return _finalize_instagram(chosen.get("text", ""), media_entries)
 
 
 def _publish_x(burst: dict, candidates: list) -> list:
     chosen = selector.choose(burst.get("manifest", ""), candidates, X_SELECT_STRATEGY)
     if not chosen:
         return None
-    text = chosen.get("text", "")
     media_entries = _resolve_media(chosen)
-    return _finalize_x(text, media_entries)
+    log.info("X: публикую msg %s, медиа %d",
+             chosen.get("message_id"), len(media_entries))
+    return _finalize_x(chosen.get("text", ""), media_entries)
 
 
 def _resolve_media(chosen: dict) -> list:
@@ -230,7 +251,7 @@ def _process_zip_burst(burst: dict):
 
     results = db.get_results(burst["id"])
     if not results:
-        log.info("Пачка %s: публиковать нечего (ни одна площадка не совпала с kit)",
+        log.info("Пачка %s: публиковать нечего (ни одна площадка не совпала с zip)",
                   burst["id"][:8])
         db.mark_skipped(burst["id"], "ни одна включённая площадка не нашлась в zip")
         return
