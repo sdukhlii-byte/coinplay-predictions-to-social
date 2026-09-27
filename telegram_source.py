@@ -182,15 +182,26 @@ async def _handle_zip(message, chat_id: int) -> None:
                             message.id, text_path, name, e)
 
         media = []
-        for img_name in spec.get("images", []) or []:
-            img_path = os.path.join(tmp_dir, name, img_name)
-            if not os.path.exists(img_path):
-                log.warning("msg %s: в архиве нет %s/%s из kit.json",
-                            message.id, name, img_name)
-                continue
-            mime = mimetypes.guess_type(img_path)[0] or "image/jpeg"
-            key = db.register_media(img_path, "image", mime)
-            media.append({"kind": "image", "key": key, "filename": img_name})
+        # ВАЖНО: ai-match-lab/cs-match-lab кладут видео-кит под ключом
+        # "videos" (format: "ai-match-lab-video") — раньше тут читался
+        # только "images", поэтому для видео-китов media всегда оставался
+        # пустым и пост уходил одним текстом без картинки/видео вообще,
+        # без единой ошибки в логах. "photos" — синоним на случай кита
+        # со старым/другим именем поля.
+        for kind, field, default_mime in (
+            ("image", "images", "image/jpeg"),
+            ("image", "photos", "image/jpeg"),
+            ("video", "videos", "video/mp4"),
+        ):
+            for file_name in spec.get(field, []) or []:
+                file_path = os.path.join(tmp_dir, name, file_name)
+                if not os.path.exists(file_path):
+                    log.warning("msg %s: в архиве нет %s/%s из kit.json",
+                                message.id, name, file_name)
+                    continue
+                mime = mimetypes.guess_type(file_path)[0] or default_mime
+                key = db.register_media(file_path, kind, mime)
+                media.append({"kind": kind, "key": key, "filename": file_name})
 
         if text or media:
             platforms_out[name] = {"text": text, "media": media}

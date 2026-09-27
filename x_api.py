@@ -8,6 +8,7 @@
 """
 
 import logging
+import mimetypes
 import os
 import re
 import time
@@ -32,6 +33,12 @@ ME_URL = "https://api.x.com/2/users/me"
 
 # Больше 4 вложений X не принимает.
 MAX_MEDIA = 4
+
+# Видео (и GIF) X принимает только через чанкованную загрузку — простой
+# POST, который годится для картинок, для видео отдаёт 400
+# "media type unrecognized." Это и было причиной ошибок в логах.
+_VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".gif"}
+_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB — с запасом под лимит X в 5 МиБ/чанк
 
 
 class XError(RuntimeError):
@@ -126,6 +133,9 @@ def _upload_media(path: str) -> str:
     if not os.path.exists(path):
         raise XError(f"Файл не найден: {path}")
 
+    if os.path.splitext(path)[1].lower() in _VIDEO_EXTS:
+        return _upload_video(path)
+
     with open(path, "rb") as f:
         r = requests.post(
             MEDIA_UPLOAD_URL,
@@ -139,6 +149,89 @@ def _upload_media(path: str) -> str:
     media_id = r.json().get("media_id_string")
     if not media_id:
         raise XError(f"Ответ без media_id: {r.text[:200]}")
+    return media_id
+
+
+def _upload_video(path: str) -> str:
+    """
+    Загрузка видео по протоколу INIT -> APPEND* -> FINALIZE -> опрос STATUS.
+
+    Одним POST'ом (как для картинок) X отвечает 400 "media type
+    unrecognized." — именно эта ошибка и стояла в логах Railway. Видео
+    обязано идти чанками с явным media_category=tweet_video.
+    """
+    total_bytes = os.path.getsize(path)
+    mime_type = mimetypes.guess_type(path)[0] or "video/mp4"
+    category = "tweet_gif" if path.lower().endswith(".gif") else "tweet_video"
+
+    r = requests.post(
+        MEDIA_UPLOAD_URL,
+        auth=_auth(),
+        data={
+            "command": "INIT",
+            "total_bytes": total_bytes,
+            "media_type": mime_type,
+            "media_category": category,
+        },
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise XError(f"INIT видео -> {r.status_code}: {r.text[:300]}")
+    media_id = r.json().get("media_id_string")
+    if not media_id:
+        raise XError(f"INIT видео: ответ без media_id: {r.text[:200]}")
+
+    with open(path, "rb") as f:
+        segment_index = 0
+        while True:
+            chunk = f.read(_CHUNK_SIZE)
+            if not chunk:
+                break
+            r = requests.post(
+                MEDIA_UPLOAD_URL,
+                auth=_auth(),
+                data={
+                    "command": "APPEND",
+                    "media_id": media_id,
+                    "segment_index": segment_index,
+                },
+                files={"media": chunk},
+                timeout=120,
+            )
+            if r.status_code >= 400:
+                raise XError(
+                    f"APPEND видео (сегмент {segment_index}) -> "
+                    f"{r.status_code}: {r.text[:300]}"
+                )
+            segment_index += 1
+
+    r = requests.post(
+        MEDIA_UPLOAD_URL,
+        auth=_auth(),
+        data={"command": "FINALIZE", "media_id": media_id},
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise XError(f"FINALIZE видео -> {r.status_code}: {r.text[:300]}")
+
+    info = r.json()
+    processing = info.get("processing_info")
+    while processing and processing.get("state") in ("pending", "in_progress"):
+        time.sleep(processing.get("check_after_secs", 3))
+        r = requests.get(
+            MEDIA_UPLOAD_URL,
+            auth=_auth(),
+            params={"command": "STATUS", "media_id": media_id},
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            raise XError(f"STATUS видео -> {r.status_code}: {r.text[:300]}")
+        info = r.json()
+        processing = info.get("processing_info")
+
+    if processing and processing.get("state") == "failed":
+        raise XError(f"Обработка видео на стороне X не удалась: {processing.get('error')}")
+
     return media_id
 
 

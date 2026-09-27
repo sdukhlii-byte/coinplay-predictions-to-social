@@ -142,8 +142,15 @@ def _create_container(caption: str, media: list) -> str:
         if caption:
             payload["caption"] = caption
         if item["kind"] == "video":
-            payload["media_type"] = "VIDEO"
+            # Meta отключила media_type=VIDEO для одиночного видео в Feed —
+            # теперь это REELS (с share_to_feed, чтобы он ещё показывался и
+            # в ленте, а не только в Reels-вкладке). Отсюда и наблюдавшийся
+            # error_subcode 2207067 "Invalid parameter" в логах Railway.
+            # Для дочерних элементов карусели (_create_item_container ниже)
+            # Meta по-прежнему требует именно VIDEO — там не трогаем.
+            payload["media_type"] = "REELS"
             payload["video_url"] = item["url"]
+            payload["share_to_feed"] = "true"
         else:
             payload["image_url"] = item["url"]
         container_id = _post(f"{INSTAGRAM_USER_ID}/media", payload)["id"]
