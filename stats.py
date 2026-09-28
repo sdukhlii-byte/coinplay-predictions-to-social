@@ -24,6 +24,15 @@ log = logging.getLogger("stats")
 
 PLATFORM_LABELS = {"threads": "Threads", "instagram": "Instagram", "x": "X"}
 
+# Ссылки на наши аккаунты — используются в отчёте вместо "@username", чтобы
+# Telegram не пытался резолвить его как упоминание тг-юзера (несуществующего
+# и никак не связанного с реальным аккаунтом на площадке).
+ACCOUNT_URLS = {
+    "threads": "https://www.threads.com/@coinplayofficial",
+    "instagram": "https://www.instagram.com/coinplayofficial/",
+    "x": "https://x.com/thecoinplay",
+}
+
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
 
@@ -73,7 +82,14 @@ def collect(days: int = 7) -> dict:
     report = {p: _empty_platform() for p in index}
     posts = []
 
-    def _record(platform: str, post_id: str, views: int, likes: int, ok: bool):
+    def _post_url(platform: str, post_id: str, api_url: str = None) -> str:
+        if api_url:
+            return api_url
+        if platform == "x" and ACCOUNT_URLS.get("x"):
+            return f"{ACCOUNT_URLS['x']}/status/{post_id}"
+        return None
+
+    def _record(platform: str, post_id: str, views: int, likes: int, ok: bool, url: str = None):
         meta = index[platform].get(post_id, {})
         posts.append({
             "platform": platform,
@@ -83,6 +99,7 @@ def collect(days: int = 7) -> dict:
             "views": views,
             "likes": likes,
             "ok": ok,
+            "url": _post_url(platform, post_id, url),
         })
 
     # X отдаёт метрики батчами по 100 id одним запросом.
@@ -116,7 +133,7 @@ def collect(days: int = 7) -> dict:
             m = threads_api.get_insights(media_id)
             report["threads"]["views"] += m.get("views", 0)
             report["threads"]["likes"] += m.get("likes", 0)
-            _record("threads", media_id, m.get("views", 0), m.get("likes", 0), True)
+            _record("threads", media_id, m.get("views", 0), m.get("likes", 0), True, m.get("url"))
         except Exception as e:
             log.warning("Threads: метрики %s недоступны: %s", media_id, e)
             report["threads"]["errors"] += 1
@@ -128,7 +145,7 @@ def collect(days: int = 7) -> dict:
             m = instagram_api.get_insights(media_id)
             report["instagram"]["views"] += m.get("views", 0)
             report["instagram"]["likes"] += m.get("likes", 0)
-            _record("instagram", media_id, m.get("views", 0), m.get("likes", 0), True)
+            _record("instagram", media_id, m.get("views", 0), m.get("likes", 0), True, m.get("url"))
         except Exception as e:
             log.warning("Instagram: метрики %s недоступны: %s", media_id, e)
             report["instagram"]["errors"] += 1
@@ -158,12 +175,26 @@ def collect(days: int = 7) -> dict:
 
 
 def format_text(data: dict) -> str:
+    """
+    HTML (send_to_telegram шлёт с parse_mode=HTML) — юзернейм площадки
+    кликабелен и ведёт на реальный аккаунт (ACCOUNT_URLS), а не на
+    несуществующего тг-юзера, как было бы с голым "@username".
+    """
+    import html as _html
+
     lines = [f"📊 Статистика постов за последние {data['days']} дн.", ""]
     accounts = data.get("accounts") or {}
     for key, label in PLATFORM_LABELS.items():
         p = data["platforms"].get(key, _empty_platform())
         username = accounts.get(key)
-        lines.append(f"{label} (@{username})" if username else label)
+        url = ACCOUNT_URLS.get(key)
+        if username and url:
+            handle = f'<a href="{_html.escape(url)}">@{_html.escape(username)}</a>'
+            lines.append(f"{label} ({handle})")
+        elif username:
+            lines.append(f"{label} (@{_html.escape(username)})")
+        else:
+            lines.append(label)
         line = f"опубликовано {p['posts']} постов — {p['views']} просмотров — {p['likes']} лайков"
         if p["errors"]:
             line += f" (⚠️ {p['errors']} без данных)"
@@ -182,7 +213,7 @@ def send_to_telegram(data: dict, text: str = None) -> bool:
 
     r = requests.post(
         TELEGRAM_API.format(token=TELEGRAM_BOT_TOKEN, method="sendMessage"),
-        data={"chat_id": STATS_CHAT_ID, "text": text},
+        data={"chat_id": STATS_CHAT_ID, "text": text, "parse_mode": "HTML"},
         timeout=30,
     )
     if r.status_code >= 400:
