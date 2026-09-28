@@ -33,6 +33,7 @@ from config import (
     X_ENABLED,
     X_HASHTAGS,
     X_LONG_TEXT_MODE,
+    X_REQUIRE_IMAGE,
     X_SELECT_STRATEGY,
     X_TEXT_LIMIT,
 )
@@ -114,6 +115,14 @@ def _finalize_instagram(text: str, media_entries: list):
 
 def _finalize_x(text: str, media_entries: list):
     text = _clean_text(text)
+
+    # В X нужны только посты с картинкой — ни голого текста, ни видео.
+    # (Видео туда в принципе почти никогда не должно долетать: генератор
+    # видео сейчас отключён через VIDEO_KIT_ENABLED, а тут — подстраховка
+    # на случай, если оно всё же придёт с другого источника.)
+    if X_REQUIRE_IMAGE and not any(m.get("kind") == "image" for m in media_entries):
+        log.info("X: в пачке нет картинки — пропускаю площадку (X_REQUIRE_IMAGE=true)")
+        return None
 
     # Резервируем место под хештеги, иначе они не влезут после сжатия.
     tags = hashtags.parse(X_HASHTAGS)

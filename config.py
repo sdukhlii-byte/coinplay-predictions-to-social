@@ -100,6 +100,14 @@ POST_FILTER_PHRASE = _opt("POST_FILTER_PHRASE", "")
 # Вырезать фразу-маркер из текста перед публикацией.
 STRIP_FILTER_PHRASE = _opt("STRIP_FILTER_PHRASE", "false").lower() == "true"
 
+# Никогда не публиковать пост, если в тексте есть любая из этих фраз —
+# в отличие от POST_FILTER_PHRASE (обязан совпасть), эта исключает.
+# По умолчанию отсекает служебные заглушки самого бота-предиктора
+# ("... needs a human because: panel split 5-5 of 10 ..."), которые
+# утекают в кит как обычный текст площадки, когда панель моделей
+# разошлась и бот сам просит ручную проверку вместо публикации.
+POST_EXCLUDE_PHRASE = _opt("POST_EXCLUDE_PHRASE", "needs a human")
+
 # --- Схлопывание дублей ---
 # Один матч приходит несколькими вариантами подряд (instagram, x, длинный).
 # Сообщения, пришедшие в пределах этого окна, считаются одной пачкой.
@@ -128,6 +136,16 @@ MANIFEST_TYPES = _opt("MANIFEST_TYPES", "")
 WORKER_INTERVAL_SECONDS = int(_opt("WORKER_INTERVAL_SECONDS", "10"))
 MAX_ATTEMPTS = int(_opt("MAX_ATTEMPTS", "5"))
 ALLOW_EMPTY_TEXT = _opt("ALLOW_EMPTY_TEXT", "true").lower() == "true"
+
+# Видео-кит от AI Match Lab / cs-match-lab (поле "videos" в kit.json).
+# Временный рубильник: пока false — видео из зип-китов не подхватываются
+# вообще, как будто их там нет (картинки из того же кита публикуются как
+# обычно). Включить обратно — поставить true.
+VIDEO_KIT_ENABLED = _opt("VIDEO_KIT_ENABLED", "true").lower() == "true"
+
+# X: публиковать пост, только если в нём есть хотя бы одна картинка.
+# Постов "голым текстом" в X быть не должно.
+X_REQUIRE_IMAGE = _opt("X_REQUIRE_IMAGE", "true").lower() == "true"
 # Убирать хештеги, пришедшие из источника.
 STRIP_HASHTAGS = _opt("STRIP_HASHTAGS", "false").lower() == "true"
 

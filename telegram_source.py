@@ -27,6 +27,7 @@ from config import (
     TELEGRAM_API_HASH,
     TELEGRAM_API_ID,
     TELEGRAM_STRING_SESSION,
+    VIDEO_KIT_ENABLED,
 )
 
 log = logging.getLogger("source")
@@ -181,6 +182,16 @@ async def _handle_zip(message, chat_id: int) -> None:
                 log.warning("msg %s: не прочитан текст %s для %s: %s",
                             message.id, text_path, name, e)
 
+        # zip-кит идёт мимо post_filter.matches() (там нечего сопоставлять —
+        # выбора вариантов нет, всё уже разложено по площадкам), но
+        # заглушки вида "needs a human because: panel split ..." всё равно
+        # не должны публиковаться. Раз попалась — площадку просто не
+        # собираем, как будто текста для неё не было.
+        if post_filter.excluded(text):
+            log.info("msg %s: текст площадки %s — служебная заглушка, не публикую: %r",
+                      message.id, name, text[:120])
+            text = ""
+
         media = []
         # ВАЖНО: ai-match-lab/cs-match-lab кладут видео-кит под ключом
         # "videos" (format: "ai-match-lab-video") — раньше тут читался
@@ -188,11 +199,25 @@ async def _handle_zip(message, chat_id: int) -> None:
         # пустым и пост уходил одним текстом без картинки/видео вообще,
         # без единой ошибки в логах. "photos" — синоним на случай кита
         # со старым/другим именем поля.
-        for kind, field, default_mime in (
+        #
+        # VIDEO_KIT_ENABLED=false — видео-генератор временно отключён:
+        # поле "videos" просто не читается, как будто его в ките нет.
+        # Картинки того же кита (images/photos), если есть, публикуются
+        # как обычно.
+        fields = [
             ("image", "images", "image/jpeg"),
             ("image", "photos", "image/jpeg"),
-            ("video", "videos", "video/mp4"),
-        ):
+        ]
+        if VIDEO_KIT_ENABLED:
+            fields.append(("video", "videos", "video/mp4"))
+        else:
+            skipped = spec.get("videos") or []
+            if skipped:
+                log.info("msg %s: видео-генератор отключён (VIDEO_KIT_ENABLED=false) — "
+                          "пропускаю %d видео из кита для %s",
+                          message.id, len(skipped), name)
+
+        for kind, field, default_mime in fields:
             for file_name in spec.get(field, []) or []:
                 file_path = os.path.join(tmp_dir, name, file_name)
                 if not os.path.exists(file_path):
