@@ -458,10 +458,14 @@ def posted_since(cutoff_ts: float) -> list:
     Опубликованные (status='posted') пачки не раньше cutoff_ts — источник
     для сбора статистики: 'results' содержит id постов по каждой площадке
     ({'threads': [...], 'instagram': [...], 'x': [...]}).
+
+    chat_id/manifest/kit тоже отдаются — чтобы в отчёте было видно не только
+    сколько всего опубликовано, но и какой конкретно пост, из какого
+    источника (chat_id) и с каким заголовком.
     """
     with _lock:
         rows = _conn.execute(
-            "SELECT id, results, updated_at FROM bursts"
+            "SELECT id, chat_id, manifest, kit, results, updated_at FROM bursts"
             " WHERE status = 'posted' AND updated_at >= ?"
             " ORDER BY updated_at",
             (cutoff_ts,),
@@ -472,7 +476,22 @@ def posted_since(cutoff_ts: float) -> list:
             results = json.loads(r["results"] or "{}")
         except Exception:
             results = {}
-        out.append({"id": r["id"], "results": results, "updated_at": r["updated_at"]})
+
+        manifest = r["manifest"] or ""
+        title = manifest.splitlines()[0][:120] if manifest else ""
+        if not title and r["kit"]:
+            try:
+                title = (json.loads(r["kit"]).get("title") or "")[:120]
+            except Exception:
+                pass
+
+        out.append({
+            "id": r["id"],
+            "chat_id": r["chat_id"],
+            "title": title,
+            "results": results,
+            "updated_at": r["updated_at"],
+        })
     return out
 
 
