@@ -31,10 +31,30 @@ def _empty_platform() -> dict:
     return {"posts": 0, "views": 0, "likes": 0, "errors": 0}
 
 
+def _account_usernames() -> dict:
+    """Юзернеймы аккаунтов по площадкам — для подписи в отчёте. Ошибка на
+    одной площадке не должна валить остальные, поэтому каждая — отдельный try."""
+    out = {}
+    try:
+        out["threads"] = threads_api.whoami().get("username")
+    except Exception as e:
+        log.warning("Threads: не удалось узнать username: %s", e)
+    try:
+        out["instagram"] = instagram_api.whoami().get("username")
+    except Exception as e:
+        log.warning("Instagram: не удалось узнать username: %s", e)
+    try:
+        out["x"] = x_api.whoami().get("username")
+    except Exception as e:
+        log.warning("X: не удалось узнать username: %s", e)
+    return out
+
+
 def collect(days: int = 7) -> dict:
     """Собирает и агрегирует статистику по всем площадкам за последние `days` дней."""
     cutoff = time.time() - days * 86400
     bursts = db.posted_since(cutoff)
+    accounts = _account_usernames()
 
     ids_by_platform = {"threads": [], "instagram": [], "x": []}
     for b in bursts:
@@ -87,14 +107,17 @@ def collect(days: int = 7) -> dict:
         "since": cutoff,
         "generated_at": time.time(),
         "platforms": report,
+        "accounts": accounts,
     }
 
 
 def format_text(data: dict) -> str:
     lines = [f"📊 Статистика постов за последние {data['days']} дн.", ""]
+    accounts = data.get("accounts") or {}
     for key, label in PLATFORM_LABELS.items():
         p = data["platforms"].get(key, _empty_platform())
-        lines.append(label)
+        username = accounts.get(key)
+        lines.append(f"{label} (@{username})" if username else label)
         line = f"опубликовано {p['posts']} постов — {p['views']} просмотров — {p['likes']} лайков"
         if p["errors"]:
             line += f" (⚠️ {p['errors']} без данных)"
