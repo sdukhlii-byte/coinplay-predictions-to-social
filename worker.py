@@ -27,6 +27,7 @@ from config import (
     SELECT_STRATEGY,
     STATS_ENABLED,
     STATS_INTERVAL_DAYS,
+    STATS_RETRY_COOLDOWN_SECONDS,
     STRIP_HASHTAGS,
     TEXT_WAIT_SECONDS,
     THREADS_ENABLED,
@@ -384,15 +385,28 @@ def _tick():
         _cleanup_media()
 
     if STATS_ENABLED:
-        # Время последней отправки хранится в БД (не в памяти), чтобы рестарт
-        # сервиса не сбрасывал отсчёт и не слал отчёт заново сразу после деплоя.
+        # last_sent обновляется только при успехе — этим меряем недельный
+        # интервал. last_attempt обновляется при КАЖДОЙ попытке, успешной
+        # или нет, — иначе если Telegram недоступен (бот не в чате, не тот
+        # chat_id и т.п.), last_sent никогда не проставится, и это условие
+        # будет true на каждом тике (раз в WORKER_INTERVAL_SECONDS) —
+        # воркер долбит Instagram/Threads/X insights по кругу без остановки.
+        # STATS_RETRY_COOLDOWN не даёт повторить попытку раньше чем через
+        # STATS_RETRY_COOLDOWN_SECONDS после последней, даже неудачной.
         last_sent = float(db.get_state("stats_last_sent", "0") or "0")
-        if now - last_sent > STATS_INTERVAL_DAYS * 86400:
+        last_attempt = float(db.get_state("stats_last_attempt", "0") or "0")
+        due = now - last_sent > STATS_INTERVAL_DAYS * 86400
+        cooled_down = now - last_attempt > STATS_RETRY_COOLDOWN_SECONDS
+        if due and cooled_down:
+            db.set_state("stats_last_attempt", str(now))
             try:
                 data = stats.collect(STATS_INTERVAL_DAYS)
                 if stats.send_to_telegram(data):
                     db.set_state("stats_last_sent", str(now))
                     log.info("Статистика: еженедельный отчёт отправлен")
+                else:
+                    log.warning("Статистика: отправка не удалась, следующая попытка не раньше чем через %d сек",
+                                STATS_RETRY_COOLDOWN_SECONDS)
             except Exception as e:
                 log.error("Статистика: не удалось собрать/отправить отчёт: %s", e)
 
