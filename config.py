@@ -146,6 +146,9 @@ VIDEO_KIT_ENABLED = _opt("VIDEO_KIT_ENABLED", "true").lower() == "true"
 # X: публиковать пост, только если в нём есть хотя бы одна картинка.
 # Постов "голым текстом" в X быть не должно.
 X_REQUIRE_IMAGE = _opt("X_REQUIRE_IMAGE", "true").lower() == "true"
+
+# То же самое правило для Threads.
+THREADS_REQUIRE_IMAGE = _opt("THREADS_REQUIRE_IMAGE", "true").lower() == "true"
 # Убирать хештеги, пришедшие из источника.
 STRIP_HASHTAGS = _opt("STRIP_HASHTAGS", "false").lower() == "true"
 

@@ -28,6 +28,7 @@ from config import (
     TEXT_WAIT_SECONDS,
     THREADS_ENABLED,
     THREADS_HASHTAGS,
+    THREADS_REQUIRE_IMAGE,
     THREADS_TEXT_LIMIT,
     WORKER_INTERVAL_SECONDS,
     X_ENABLED,
@@ -83,6 +84,10 @@ def _strip_links(text: str) -> str:
 
 
 def _finalize_threads(text: str, media_entries: list):
+    if THREADS_REQUIRE_IMAGE and not any(m.get("kind") == "image" for m in media_entries):
+        log.info("Threads: в пачке нет картинки — пропускаю площадку (THREADS_REQUIRE_IMAGE=true)")
+        return None
+
     text = _clean_text(text)
     text = _strip_links(text)
     text = hashtags.append(text, THREADS_HASHTAGS, THREADS_TEXT_LIMIT)
