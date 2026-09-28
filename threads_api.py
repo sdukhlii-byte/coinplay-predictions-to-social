@@ -180,21 +180,28 @@ def whoami() -> dict:
 
 def get_insights(media_id: str) -> dict:
     """
-    Просмотры и лайки одного поста. Threads insights отдаёт метрики
-    "total_value" (лайфтайм-метрика), а не таймсерию — но на всякий случай
-    подстраховываемся под оба возможных формата ответа.
+    Просмотры, лайки и прямая ссылка на один пост. Threads insights отдаёт
+    метрики "total_value" (лайфтайм-метрика), а не таймсерию — но на всякий
+    случай подстраховываемся под оба возможных формата ответа.
     """
     data = _get(f"{media_id}/insights", {"metric": "views,likes"})
-    out = {"views": 0, "likes": 0}
+    out = {"views": 0, "likes": 0, "url": None}
     for item in data.get("data", []):
         name = item.get("name")
-        if name not in out:
+        if name not in ("views", "likes"):
             continue
         total = item.get("total_value") or {}
         if "value" in total:
             out[name] = total["value"]
         elif item.get("values"):
             out[name] = item["values"][0].get("value", 0)
+
+    try:
+        media = _get(media_id, {"fields": "permalink"})
+        out["url"] = media.get("permalink")
+    except ThreadsError as e:
+        log.warning("Threads media(%s): permalink недоступен: %s", media_id, e)
+
     return out
 
 
