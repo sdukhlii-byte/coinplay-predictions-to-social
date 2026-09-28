@@ -200,7 +200,7 @@ def get_insights(media_id: str) -> dict:
     в Graph API (заменило отдельные impressions/plays для фото и видео).
     like_count лежит не в insights, а прямо в полях самого media-объекта.
     """
-    out = {"views": 0, "likes": 0}
+    out = {"views": 0, "likes": 0, "url": None}
 
     try:
         data = _get(f"{media_id}/insights", {"metric": "views"})
@@ -216,10 +216,11 @@ def get_insights(media_id: str) -> dict:
         log.warning("IG insights(%s): просмотры недоступны: %s", media_id, e)
 
     try:
-        media = _get(media_id, {"fields": "like_count"})
+        media = _get(media_id, {"fields": "like_count,permalink"})
         out["likes"] = media.get("like_count", 0)
+        out["url"] = media.get("permalink")
     except InstagramError as e:
-        log.warning("IG media(%s): like_count недоступен: %s", media_id, e)
+        log.warning("IG media(%s): like_count/permalink недоступен: %s", media_id, e)
 
     return out
 
