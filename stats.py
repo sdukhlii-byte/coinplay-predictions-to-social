@@ -56,51 +56,95 @@ def collect(days: int = 7) -> dict:
     bursts = db.posted_since(cutoff)
     accounts = _account_usernames()
 
-    ids_by_platform = {"threads": [], "instagram": [], "x": []}
+    # id -> (burst_id, chat_id, title), чтобы после сбора метрик знать, какому
+    # конкретно посту/источнику они принадлежат (не только сумму по площадке).
+    index = {"threads": {}, "instagram": {}, "x": {}}
     for b in bursts:
         for platform, ids in (b.get("results") or {}).items():
-            if platform in ids_by_platform and ids:
-                ids_by_platform[platform].extend(ids)
+            if platform not in index or not ids:
+                continue
+            for post_id in ids:
+                index[platform][post_id] = {
+                    "burst_id": b["id"],
+                    "chat_id": b.get("chat_id"),
+                    "title": b.get("title") or "",
+                }
 
-    report = {p: _empty_platform() for p in ids_by_platform}
+    report = {p: _empty_platform() for p in index}
+    posts = []
+
+    def _record(platform: str, post_id: str, views: int, likes: int, ok: bool):
+        meta = index[platform].get(post_id, {})
+        posts.append({
+            "platform": platform,
+            "post_id": post_id,
+            "chat_id": meta.get("chat_id"),
+            "title": meta.get("title", ""),
+            "views": views,
+            "likes": likes,
+            "ok": ok,
+        })
 
     # X отдаёт метрики батчами по 100 id одним запросом.
-    x_ids = ids_by_platform["x"]
+    x_ids = list(index["x"].keys())
     if x_ids:
         report["x"]["posts"] = len(x_ids)
         try:
             metrics = x_api.get_metrics(x_ids)
-            for m in metrics.values():
+            for post_id in x_ids:
+                m = metrics.get(post_id)
+                if m is None:
+                    report["x"]["errors"] += 1
+                    _record("x", post_id, 0, 0, False)
+                    continue
                 report["x"]["views"] += m.get("views", 0)
                 report["x"]["likes"] += m.get("likes", 0)
+                _record("x", post_id, m.get("views", 0), m.get("likes", 0), True)
             missing = len(x_ids) - len(metrics)
             if missing:
                 log.warning("X: метрики не найдены для %d из %d постов", missing, len(x_ids))
-                report["x"]["errors"] += missing
         except Exception as e:
             log.error("X: не удалось получить метрики: %s", e)
             report["x"]["errors"] += len(x_ids)
+            for post_id in x_ids:
+                _record("x", post_id, 0, 0, False)
 
     # У Threads и Instagram нет батч-эндпоинта для insights — только по одному id.
-    for media_id in ids_by_platform["threads"]:
+    for media_id in index["threads"]:
         report["threads"]["posts"] += 1
         try:
             m = threads_api.get_insights(media_id)
             report["threads"]["views"] += m.get("views", 0)
             report["threads"]["likes"] += m.get("likes", 0)
+            _record("threads", media_id, m.get("views", 0), m.get("likes", 0), True)
         except Exception as e:
             log.warning("Threads: метрики %s недоступны: %s", media_id, e)
             report["threads"]["errors"] += 1
+            _record("threads", media_id, 0, 0, False)
 
-    for media_id in ids_by_platform["instagram"]:
+    for media_id in index["instagram"]:
         report["instagram"]["posts"] += 1
         try:
             m = instagram_api.get_insights(media_id)
             report["instagram"]["views"] += m.get("views", 0)
             report["instagram"]["likes"] += m.get("likes", 0)
+            _record("instagram", media_id, m.get("views", 0), m.get("likes", 0), True)
         except Exception as e:
             log.warning("Instagram: метрики %s недоступны: %s", media_id, e)
             report["instagram"]["errors"] += 1
+            _record("instagram", media_id, 0, 0, False)
+
+    # По источнику (chat_id) — сколько постов оттуда ушло за период, по площадкам.
+    by_source = {}
+    for p in posts:
+        chat_id = p["chat_id"]
+        entry = by_source.setdefault(str(chat_id), {"title_examples": [], "platforms": {}})
+        plat = entry["platforms"].setdefault(p["platform"], {"posts": 0, "views": 0, "likes": 0})
+        plat["posts"] += 1
+        plat["views"] += p["views"]
+        plat["likes"] += p["likes"]
+        if p["title"] and p["title"] not in entry["title_examples"] and len(entry["title_examples"]) < 3:
+            entry["title_examples"].append(p["title"])
 
     return {
         "days": days,
@@ -108,6 +152,8 @@ def collect(days: int = 7) -> dict:
         "generated_at": time.time(),
         "platforms": report,
         "accounts": accounts,
+        "by_source": by_source,
+        "posts": posts,
     }
 
 
