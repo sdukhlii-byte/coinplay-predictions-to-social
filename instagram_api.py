@@ -194,6 +194,36 @@ def whoami() -> dict:
     return _get(INSTAGRAM_USER_ID, {"fields": "id,username"})
 
 
+def get_insights(media_id: str) -> dict:
+    """
+    Просмотры и лайки одного медиа. "views" — текущее общее имя метрики
+    в Graph API (заменило отдельные impressions/plays для фото и видео).
+    like_count лежит не в insights, а прямо в полях самого media-объекта.
+    """
+    out = {"views": 0, "likes": 0}
+
+    try:
+        data = _get(f"{media_id}/insights", {"metric": "views"})
+        for item in data.get("data", []):
+            if item.get("name") != "views":
+                continue
+            total = item.get("total_value") or {}
+            if "value" in total:
+                out["views"] = total["value"]
+            elif item.get("values"):
+                out["views"] = item["values"][0].get("value", 0)
+    except InstagramError as e:
+        log.warning("IG insights(%s): просмотры недоступны: %s", media_id, e)
+
+    try:
+        media = _get(media_id, {"fields": "like_count"})
+        out["likes"] = media.get("like_count", 0)
+    except InstagramError as e:
+        log.warning("IG media(%s): like_count недоступен: %s", media_id, e)
+
+    return out
+
+
 def refresh_token_if_needed(min_days_left: int = 10) -> bool:
     """
     Продлевает long-lived токен, если осталось мало времени.

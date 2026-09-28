@@ -56,6 +56,34 @@ def whoami() -> dict:
     return r.json().get("data", {})
 
 
+def get_metrics(tweet_ids: list) -> dict:
+    """
+    Просмотры и лайки для списка твитов. X отдаёт метрики батчами
+    до 100 id за один запрос — дороже по деньгам не становится
+    (это не отдельный tweet, а просто GET).
+
+    Возвращает {tweet_id: {"views": N, "likes": N}}.
+    """
+    out = {}
+    for i in range(0, len(tweet_ids), 100):
+        batch = tweet_ids[i:i + 100]
+        r = requests.get(
+            TWEETS_URL,
+            auth=_auth(),
+            params={"ids": ",".join(batch), "tweet.fields": "public_metrics"},
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            raise XError(f"GET tweets (metrics) -> {r.status_code}: {r.text[:300]}")
+        for item in r.json().get("data", []):
+            pm = item.get("public_metrics") or {}
+            out[item["id"]] = {
+                "views": pm.get("impression_count", 0),
+                "likes": pm.get("like_count", 0),
+            }
+    return out
+
+
 def fit(text: str, limit: int = X_TEXT_LIMIT) -> str:
     """
     Ужимает текст под лимит одного твита.

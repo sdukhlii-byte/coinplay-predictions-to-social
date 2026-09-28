@@ -175,3 +175,19 @@ IG_GRAPH = "https://graph.facebook.com/v21.0"
 # те же, что в Meta App: developers.facebook.com/apps/<APP_ID>/settings/basic/
 META_APP_ID = _opt("META_APP_ID")
 META_APP_SECRET = _opt("META_APP_SECRET")
+
+# --- Статистика постов (просмотры/лайки по площадкам) ---
+# Бот, которым отчёт шлётся в Telegram-чат (не юзер-сессия Telethon —
+# обычный Bot API токен от @BotFather, добавленный в целевой чат).
+TELEGRAM_BOT_TOKEN = _opt("TELEGRAM_BOT_TOKEN")
+# Чат/группа, куда слать еженедельный и ручной отчёт. Отрицательное число
+# для группы — например -1004364911823. Узнать: добавить бота в чат,
+# написать туда что угодно, дёрнуть
+# https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates и посмотреть chat.id.
+STATS_CHAT_ID = _opt("STATS_CHAT_ID")
+# Автоматический еженедельный отчёт включён, только если заданы и токен, и чат.
+STATS_ENABLED = (
+    _opt("STATS_ENABLED", "true").lower() == "true"
+    and bool(TELEGRAM_BOT_TOKEN and STATS_CHAT_ID)
+)
+STATS_INTERVAL_DAYS = int(_opt("STATS_INTERVAL_DAYS", "7"))

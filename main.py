@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 import db
 import instagram_api
 import post_filter
+import stats
 import telegram_source
 import threads_api
 import worker
@@ -28,6 +29,7 @@ from config import (
     MEDIA_DIR,
     POST_FILTER_PHRASE,
     SELECT_STRATEGY,
+    STATS_ENABLED,
     THREADS_ENABLED,
     X_ENABLED,
     X_SELECT_STRATEGY,
@@ -93,6 +95,12 @@ async def lifespan(app: FastAPI):
     else:
         log.info("Фильтр выключен: публикуются все посты")
     log.info("Стратегия выбора: Threads=%s, X=%s", SELECT_STRATEGY, X_SELECT_STRATEGY)
+
+    if STATS_ENABLED:
+        log.info("Статистика: еженедельный отчёт включён")
+    else:
+        log.info("Статистика: выключена (нет TELEGRAM_BOT_TOKEN/STATS_CHAT_ID "
+                 "или STATS_ENABLED=false) — доступна только вручную через /admin/stats")
 
     await telegram_source.start()
     worker.start()
@@ -164,3 +172,29 @@ def admin_requeue(burst_id: str, token: str = ""):
         "title": (burst.get("manifest") or "").splitlines()[0][:80],
         "already_posted_to": list(json.loads(burst.get("results") or "{}").keys()),
     }
+
+
+@app.get("/admin/stats")
+def admin_stats(token: str = "", days: int = 7, send: bool = True):
+    """
+    Статистика опубликованных постов (просмотры/лайки) по площадкам за
+    последние `days` дней. По умолчанию (send=true) отчёт заодно уходит в
+    STATS_CHAT_ID в Telegram — тем же способом, что и еженедельная
+    автоматическая рассылка (см. worker._tick). send=false — только
+    посмотреть JSON, ничего никуда не слать.
+
+    Пример: /admin/stats?token=...&days=14&send=false
+    """
+    if not ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=403,
+            detail="ADMIN_TOKEN не задан — /admin отключён. "
+                   "Задайте ADMIN_TOKEN в переменных окружения, чтобы включить.",
+        )
+    if token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Неверный token")
+
+    data = stats.collect(days)
+    if send:
+        data["sent_to_telegram"] = stats.send_to_telegram(data)
+    return data

@@ -12,6 +12,7 @@ import hashtags
 import instagram_api
 import post_filter
 import selector
+import stats
 import telegram_source
 import threads_api
 import x_api
@@ -24,6 +25,8 @@ from config import (
     INSTAGRAM_SELECT_STRATEGY,
     MAX_ATTEMPTS,
     SELECT_STRATEGY,
+    STATS_ENABLED,
+    STATS_INTERVAL_DAYS,
     STRIP_HASHTAGS,
     TEXT_WAIT_SECONDS,
     THREADS_ENABLED,
@@ -379,6 +382,19 @@ def _tick():
     if now - _last_cleanup > 6 * 3600:
         _last_cleanup = now
         _cleanup_media()
+
+    if STATS_ENABLED:
+        # Время последней отправки хранится в БД (не в памяти), чтобы рестарт
+        # сервиса не сбрасывал отсчёт и не слал отчёт заново сразу после деплоя.
+        last_sent = float(db.get_state("stats_last_sent", "0") or "0")
+        if now - last_sent > STATS_INTERVAL_DAYS * 86400:
+            try:
+                data = stats.collect(STATS_INTERVAL_DAYS)
+                if stats.send_to_telegram(data):
+                    db.set_state("stats_last_sent", str(now))
+                    log.info("Статистика: еженедельный отчёт отправлен")
+            except Exception as e:
+                log.error("Статистика: не удалось собрать/отправить отчёт: %s", e)
 
 
 def _loop():

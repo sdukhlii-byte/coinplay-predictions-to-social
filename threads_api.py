@@ -178,6 +178,26 @@ def whoami() -> dict:
     return _get("me", {"fields": "id,username"})
 
 
+def get_insights(media_id: str) -> dict:
+    """
+    Просмотры и лайки одного поста. Threads insights отдаёт метрики
+    "total_value" (лайфтайм-метрика), а не таймсерию — но на всякий случай
+    подстраховываемся под оба возможных формата ответа.
+    """
+    data = _get(f"{media_id}/insights", {"metric": "views,likes"})
+    out = {"views": 0, "likes": 0}
+    for item in data.get("data", []):
+        name = item.get("name")
+        if name not in out:
+            continue
+        total = item.get("total_value") or {}
+        if "value" in total:
+            out[name] = total["value"]
+        elif item.get("values"):
+            out[name] = item["values"][0].get("value", 0)
+    return out
+
+
 def refresh_token_if_needed(min_days_left: int = 10) -> bool:
     """
     Продлевает long-lived токен, если до истечения осталось мало времени.

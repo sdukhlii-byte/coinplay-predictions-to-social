@@ -451,6 +451,31 @@ def delete_media(key: str):
         _conn.commit()
 
 
+# --- Статистика ---
+
+def posted_since(cutoff_ts: float) -> list:
+    """
+    Опубликованные (status='posted') пачки не раньше cutoff_ts — источник
+    для сбора статистики: 'results' содержит id постов по каждой площадке
+    ({'threads': [...], 'instagram': [...], 'x': [...]}).
+    """
+    with _lock:
+        rows = _conn.execute(
+            "SELECT id, results, updated_at FROM bursts"
+            " WHERE status = 'posted' AND updated_at >= ?"
+            " ORDER BY updated_at",
+            (cutoff_ts,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            results = json.loads(r["results"] or "{}")
+        except Exception:
+            results = {}
+        out.append({"id": r["id"], "results": results, "updated_at": r["updated_at"]})
+    return out
+
+
 # --- Состояние ---
 
 def get_state(key: str, default=None):
