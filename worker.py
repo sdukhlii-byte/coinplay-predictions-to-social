@@ -25,6 +25,7 @@ from config import (
     INSTAGRAM_SELECT_STRATEGY,
     MAX_ATTEMPTS,
     SELECT_STRATEGY,
+    SOURCE_HASHTAGS,
     STATS_ENABLED,
     STATS_INTERVAL_DAYS,
     STATS_RETRY_COOLDOWN_SECONDS,
@@ -87,14 +88,27 @@ def _strip_links(text: str) -> str:
     return new_text
 
 
-def _finalize_threads(text: str, media_entries: list):
+def _hashtags_for(platform: str, chat_id, default_raw: str) -> str:
+    """
+    Теги для конкретной площадки+источника. Если для этого chat_id в
+    SOURCE_HASHTAGS заданы свои теги — берём их (иначе, если источник там
+    есть, но площадка в нём не указана — тоже общий default_raw), иначе
+    общий набор по умолчанию (THREADS_HASHTAGS/X_HASHTAGS/INSTAGRAM_HASHTAGS).
+    """
+    per_source = SOURCE_HASHTAGS.get(str(chat_id)) if chat_id is not None else None
+    if per_source and platform in per_source:
+        return per_source[platform]
+    return default_raw
+
+
+def _finalize_threads(text: str, media_entries: list, chat_id=None):
     if THREADS_REQUIRE_IMAGE and not any(m.get("kind") == "image" for m in media_entries):
         log.info("Threads: в пачке нет картинки — пропускаю площадку (THREADS_REQUIRE_IMAGE=true)")
         return None
 
     text = _clean_text(text)
     text = _strip_links(text)
-    text = hashtags.append(text, THREADS_HASHTAGS, THREADS_TEXT_LIMIT)
+    text = hashtags.append(text, _hashtags_for("threads", chat_id, THREADS_HASHTAGS), THREADS_TEXT_LIMIT)
     media = [
         {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
         for m in media_entries
@@ -107,9 +121,9 @@ def _finalize_threads(text: str, media_entries: list):
     return threads_api.publish(text, media)
 
 
-def _finalize_instagram(text: str, media_entries: list):
+def _finalize_instagram(text: str, media_entries: list, chat_id=None):
     text = _clean_text(text)
-    text = hashtags.append(text, INSTAGRAM_HASHTAGS, INSTAGRAM_CAPTION_LIMIT)
+    text = hashtags.append(text, _hashtags_for("instagram", chat_id, INSTAGRAM_HASHTAGS), INSTAGRAM_CAPTION_LIMIT)
     media = [
         {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
         for m in media_entries
@@ -122,8 +136,9 @@ def _finalize_instagram(text: str, media_entries: list):
     return instagram_api.publish(text, media)
 
 
-def _finalize_x(text: str, media_entries: list):
+def _finalize_x(text: str, media_entries: list, chat_id=None):
     text = _clean_text(text)
+    raw_tags = _hashtags_for("x", chat_id, X_HASHTAGS)
 
     # В X нужны только посты с картинкой — ни голого текста, ни видео.
     # (Видео туда в принципе почти никогда не должно долетать: генератор
@@ -134,7 +149,7 @@ def _finalize_x(text: str, media_entries: list):
         return None
 
     # Резервируем место под хештеги, иначе они не влезут после сжатия.
-    tags = hashtags.parse(X_HASHTAGS)
+    tags = hashtags.parse(raw_tags)
     reserve = len(" ".join(tags)) + 2 if tags else 0
 
     if X_LONG_TEXT_MODE == "skip" and len(text) + reserve > X_TEXT_LIMIT:
@@ -145,7 +160,7 @@ def _finalize_x(text: str, media_entries: list):
     if X_LONG_TEXT_MODE != "thread":
         text = x_api.fit(text, X_TEXT_LIMIT - reserve)
 
-    text = hashtags.append(text, X_HASHTAGS, X_TEXT_LIMIT)
+    text = hashtags.append(text, raw_tags, X_TEXT_LIMIT)
 
     if not text and not media_entries:
         return None
@@ -166,7 +181,7 @@ def _publish_threads(burst: dict, candidates: list) -> list:
     media_entries = _resolve_media(chosen)
     log.info("Threads: публикую msg %s, медиа %d",
              chosen.get("message_id"), len(media_entries))
-    return _finalize_threads(chosen.get("text", ""), media_entries)
+    return _finalize_threads(chosen.get("text", ""), media_entries, burst.get("chat_id"))
 
 
 def _publish_instagram(burst: dict, candidates: list) -> list:
@@ -178,7 +193,7 @@ def _publish_instagram(burst: dict, candidates: list) -> list:
     media_entries = _resolve_media(chosen)
     log.info("Instagram: публикую msg %s, медиа %d",
              chosen.get("message_id"), len(media_entries))
-    return _finalize_instagram(chosen.get("text", ""), media_entries)
+    return _finalize_instagram(chosen.get("text", ""), media_entries, burst.get("chat_id"))
 
 
 def _publish_x(burst: dict, candidates: list) -> list:
@@ -188,7 +203,7 @@ def _publish_x(burst: dict, candidates: list) -> list:
     media_entries = _resolve_media(chosen)
     log.info("X: публикую msg %s, медиа %d",
              chosen.get("message_id"), len(media_entries))
-    return _finalize_x(chosen.get("text", ""), media_entries)
+    return _finalize_x(chosen.get("text", ""), media_entries, burst.get("chat_id"))
 
 
 def _resolve_media(chosen: dict) -> list:
@@ -255,7 +270,7 @@ def _process_zip_burst(burst: dict):
                       burst["id"][:8], name)
             continue
         try:
-            ids = FINALIZERS[name](plat.get("text", ""), plat.get("media", []))
+            ids = FINALIZERS[name](plat.get("text", ""), plat.get("media", []), burst.get("chat_id"))
             if ids is None:
                 continue
             db.save_result(burst["id"], name, ids)
