@@ -1,5 +1,6 @@
 """Конфигурация из переменных окружения."""
 
+import json
 import os
 
 
@@ -152,11 +153,41 @@ THREADS_REQUIRE_IMAGE = _opt("THREADS_REQUIRE_IMAGE", "true").lower() == "true"
 # Убирать хештеги, пришедшие из источника.
 STRIP_HASHTAGS = _opt("STRIP_HASHTAGS", "false").lower() == "true"
 
-# Свои хештеги, дописываются в конец поста.
+# Свои хештеги, дописываются в конец поста — общий набор "по умолчанию",
+# используется, если для конкретного источника (см. SOURCE_HASHTAGS ниже)
+# нет отдельных тегов, а также как теги для площадок из этого источника,
+# которые в SOURCE_HASHTAGS не переопределены.
 # Формат любой: "#cs2 #esports" или "cs2, esports".
 # Теги, уже есть в тексте, повторно не добавляются.
 THREADS_HASHTAGS = _opt("THREADS_HASHTAGS", "")
 X_HASHTAGS = _opt("X_HASHTAGS", "")
+
+# Хештеги по вертикали (футбол/UFC/esports/...), а не один общий набор на
+# все посты — иначе предикт по футболу уходит с "#cs2 #esports" и наоборот.
+# Вертикаль определяется тем, из какого именно Telegram-чата (SOURCE_CHAT_ID)
+# пришёл пост — это надёжнее, чем парсить тип из текста манифеста.
+#
+# Формат — JSON, ключ: chat_id источника (то же число, что в SOURCE_CHAT_ID),
+# значение: теги по площадкам. Площадка, не указанная для источника, берёт
+# теги из общей переменной (THREADS_HASHTAGS/X_HASHTAGS/INSTAGRAM_HASHTAGS).
+#
+# Пример:
+#   SOURCE_HASHTAGS={
+#     "-1004346691060": {"x": "#cs2 #esports #coinplay", "threads": "#cs2 #esports"},
+#     "-1004233066920": {"x": "#football #soccer #coinplay", "threads": "#football"},
+#     "-1004314031415": {"x": "#ufc #mma #coinplay", "threads": "#ufc"}
+#   }
+_SOURCE_HASHTAGS_RAW = _opt("SOURCE_HASHTAGS", "")
+if _SOURCE_HASHTAGS_RAW:
+    try:
+        SOURCE_HASHTAGS = {
+            str(int(chat_id)): {str(k).lower(): v for k, v in tags.items()}
+            for chat_id, tags in json.loads(_SOURCE_HASHTAGS_RAW).items()
+        }
+    except Exception as e:
+        raise RuntimeError(f"SOURCE_HASHTAGS: не удалось разобрать JSON — {e}")
+else:
+    SOURCE_HASHTAGS = {}
 
 # --- Константы Threads API ---
 THREADS_TEXT_LIMIT = 500
