@@ -111,6 +111,55 @@ STRIP_FILTER_PHRASE = _opt("STRIP_FILTER_PHRASE", "false").lower() == "true"
 # такие посты не должны попадать в соцсети.
 POST_EXCLUDE_PHRASE = _opt("POST_EXCLUDE_PHRASE", "needs a human|rehearsal|lynaix")
 
+# --- Маршрутизация: какой формат источника на какие площадки публикуется ---
+# Три формата: kit (zip-набор), manifest (манифест + фото), legacy (текст без
+# манифеста). Один матч приходит всеми тремя, поэтому у каждого формата своя
+# роль, а не "всё на все площадки".
+#
+# По умолчанию: kit -> Instagram и X; manifest -> все площадки; legacy -> никуда.
+# Переопределяется JSON-ом ROUTING: ключ "default" — для всех чатов, остальные
+# ключи — chat_id источника (перекрывают default для этого чата). Формат,
+# которого в записи нет, берётся из следующего уровня.
+#
+# Пример:
+#   ROUTING={
+#     "-1003996941088": {"manifest": ["threads"]},
+#     "-1003952139185": {"manifest": ["threads"]}
+#   }
+_PLATFORM_NAMES = {"threads", "instagram", "x"}
+_FORMATS = ("kit", "manifest", "legacy")
+ROUTING_DEFAULT = {
+    "kit": ["instagram", "x"],
+    "manifest": ["threads", "instagram", "x"],
+    "legacy": [],
+}
+
+
+def _parse_routing(raw: str) -> dict:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        out = {}
+        for chat, formats in data.items():
+            key = "default" if chat == "default" else str(int(chat))
+            out[key] = {}
+            for fmt, platforms in formats.items():
+                fmt = str(fmt).lower()
+                if fmt not in _FORMATS:
+                    raise ValueError(f"неизвестный формат {fmt!r} (допустимо: {', '.join(_FORMATS)})")
+                names = [str(p).lower() for p in platforms]
+                bad = [p for p in names if p not in _PLATFORM_NAMES]
+                if bad:
+                    raise ValueError(f"неизвестная площадка {bad} (допустимо: threads, instagram, x)")
+                out[key][fmt] = names
+        return out
+    except Exception as e:
+        raise RuntimeError(f"ROUTING: не удалось разобрать JSON — {e}")
+
+
+ROUTING = _parse_routing(_opt("ROUTING", ""))
+
 # --- Защита от дублей ---
 # Один матч приходит несколькими путями (zip-кит, манифест + фото, старый
 # текст без манифеста). Перед публикацией пост "занимает" ключ
@@ -119,13 +168,15 @@ DEDUP_ENABLED = _opt("DEDUP_ENABLED", "true").lower() == "true"
 # Сколько часов занятый ключ считается актуальным. Дольше — это уже другой
 # матч тех же команд.
 DEDUP_WINDOW_HOURS = float(_opt("DEDUP_WINDOW_HOURS", "18"))
-# Приоритет источников: zip-кит > манифест > старый текст. Чтобы лучший
-# вариант успел прийти, менее приоритетные ждут:
+# Запасной приоритет источников (zip-кит > манифест > старый текст), если
+# маршрутизация ROUTING не развела форматы по площадкам: менее приоритетные
+# ждут, пока лучший вариант займёт ключ матча:
 #  - старый текст без манифеста — перед публикацией куда угодно;
 #  - манифест — перед публикацией в Instagram и X (в Threads идёт сразу).
-# Старый текст обычно опережает кит минут на 13, поэтому по умолчанию 25 минут.
-DEDUP_LEGACY_GRACE_SECONDS = int(_opt("DEDUP_LEGACY_GRACE_SECONDS", "1500"))
-DEDUP_MANIFEST_GRACE_SECONDS = int(_opt("DEDUP_MANIFEST_GRACE_SECONDS", "300"))
+# По умолчанию 0 (не ждать). Старый текст опережает кит минут на 13 — если
+# понадобится, 1500.
+DEDUP_LEGACY_GRACE_SECONDS = int(_opt("DEDUP_LEGACY_GRACE_SECONDS", "0"))
+DEDUP_MANIFEST_GRACE_SECONDS = int(_opt("DEDUP_MANIFEST_GRACE_SECONDS", "0"))
 
 # --- Схлопывание дублей ---
 # Один матч приходит несколькими вариантами подряд (instagram, x, длинный).

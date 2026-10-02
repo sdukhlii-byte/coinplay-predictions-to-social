@@ -24,6 +24,8 @@ from config import (
     DEDUP_LEGACY_GRACE_SECONDS,
     DEDUP_MANIFEST_GRACE_SECONDS,
     DEDUP_WINDOW_HOURS,
+    ROUTING,
+    ROUTING_DEFAULT,
     INSTAGRAM_CAPTION_LIMIT,
     INSTAGRAM_ENABLED,
     INSTAGRAM_HASHTAGS,
@@ -272,6 +274,22 @@ def _has_publishable_text(candidates: list) -> bool:
     )
 
 
+def _format_of(burst: dict) -> str:
+    if burst.get("kit"):
+        return "kit"
+    return "manifest" if burst.get("manifest") else "legacy"
+
+
+def _allowed_platforms(burst: dict) -> set:
+    """Площадки, на которые можно публиковать пачку этого формата из этого чата (см. ROUTING)."""
+    fmt = _format_of(burst)
+    for level in (str(burst.get("chat_id")), "default"):
+        names = ROUTING.get(level, {}).get(fmt)
+        if names is not None:
+            return set(names)
+    return set(ROUTING_DEFAULT[fmt])
+
+
 STRATEGIES = {"threads": SELECT_STRATEGY, "instagram": INSTAGRAM_SELECT_STRATEGY, "x": X_SELECT_STRATEGY}
 
 
@@ -349,10 +367,14 @@ def _process_zip_burst(burst: dict):
         return
 
     done = db.get_results(burst["id"])
-    pending = [(name, fn) for name, fn in PUBLISHERS if name not in done]
+    allowed = _allowed_platforms(burst)
+    pending = [(name, fn) for name, fn in PUBLISHERS if name not in done and name in allowed]
 
     if not pending:
-        db.mark_posted(burst["id"], done.get("threads", []))
+        if done:
+            db.mark_posted(burst["id"], done.get("threads", []))
+        else:
+            db.mark_skipped(burst["id"], "маршрутизация: кит из этого чата не публикуется (ROUTING)")
         return
 
     errors = []
@@ -399,6 +421,14 @@ def _process_burst(burst: dict):
         db.mark_skipped(burst["id"], "не включена ни одна площадка")
         return
 
+    allowed = _allowed_platforms(burst)
+    if not any(name in allowed for name, _ in PUBLISHERS):
+        db.mark_skipped(
+            burst["id"],
+            f"маршрутизация: формат {_format_of(burst)} из этого чата не публикуется (ROUTING)",
+        )
+        return
+
     # Текста ещё нет. Если пачку открыл манифест, значит источник пришлёт
     # текст следом — иногда с задержкой в минуту. Ждём вместо публикации
     # пустышки, иначе текст создаст новую пачку и уйдёт без картинок.
@@ -416,7 +446,7 @@ def _process_burst(burst: dict):
 
     # Что уже улетело в прошлые попытки — не публикуем повторно.
     done = db.get_results(burst["id"])
-    pending = [(name, fn) for name, fn in PUBLISHERS if name not in done]
+    pending = [(name, fn) for name, fn in PUBLISHERS if name not in done and name in allowed]
 
     if not pending:
         db.mark_posted(burst["id"], done.get("threads", []))
