@@ -77,8 +77,14 @@ def _clean_text(text: str) -> str:
 _URL_RE = re.compile(r"(?:https?://\S+|www\.\S+|\b[a-zA-Z0-9][\w-]*\.[a-zA-Z]{2,6}/\S+)")
 
 
+# Markdown-ссылка [подпись](https://...) целиком, иначе _URL_RE съедает ")" и остаётся
+# обломок вида "[Juega en Coinplay](Link in bio".
+_MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(\s*(?:https?://|www\.)[^)\s]*\s*\)")
+
+
 def _strip_links(text: str) -> str:
     """Заменяет сырые ссылки в тексте на тот же 'Link in bio', что и так пишет источник."""
+    text = _MD_LINK_RE.sub(lambda m: f"{m.group(1)} · Link in bio", text)
     new_text, n = _URL_RE.subn("Link in bio", text)
     if not n:
         return text
@@ -86,6 +92,20 @@ def _strip_links(text: str) -> str:
     new_text = re.sub(r"[ \t]{2,}", " ", new_text)
     new_text = re.sub(r"\n{3,}", "\n\n", new_text).strip()
     return new_text
+
+
+# Хештег: решётка + слово, начинающееся с буквы ("#1" в тексте — не тег).
+_HASHTAG_RE = re.compile(r"(?<!\w)#[^\W\d]\w*", re.UNICODE)
+_TAG_ONLY_LINE_RE = re.compile(r"(?m)^[ \t]*(?:#[^\W\d]\w*[ \t]*)+$\n?", re.UNICODE)
+
+
+def _strip_hashtags(text: str) -> str:
+    """Убирает все хештеги из текста — в Threads работает один topic_tag, остальные # — мусор."""
+    text = _TAG_ONLY_LINE_RE.sub("", text)
+    text = _HASHTAG_RE.sub("", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _hashtags_for(platform: str, chat_id, default_raw: str) -> str:
@@ -108,7 +128,17 @@ def _finalize_threads(text: str, media_entries: list, chat_id=None):
 
     text = _clean_text(text)
     text = _strip_links(text)
-    text = hashtags.append(text, _hashtags_for("threads", chat_id, THREADS_HASHTAGS), THREADS_TEXT_LIMIT)
+
+    # Threads: один тег на пост, и он задаётся полем topic_tag, а не хештегом в тексте.
+    # Хештеги в тексте Threads превращает странно: первый становится темой, но теряет "#"
+    # и остаётся в тексте голым словом ("football"), остальные — неактивный мусор.
+    tags = hashtags.parse(_hashtags_for("threads", chat_id, THREADS_HASHTAGS))
+    topic_tag = threads_api.clean_topic_tag(tags[0]) if tags else None
+    if topic_tag:
+        if len(tags) > 1:
+            log.info("Threads: тег один на пост — беру %r, остальные %s не используются",
+                     tags[0], tags[1:])
+        text = _strip_hashtags(text)
     media = [
         {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
         for m in media_entries
@@ -117,8 +147,8 @@ def _finalize_threads(text: str, media_entries: list, chat_id=None):
         return None
     if not text and not ALLOW_EMPTY_TEXT:
         return None
-    log.info("Threads: публикую, медиа %d", len(media))
-    return threads_api.publish(text, media)
+    log.info("Threads: публикую, медиа %d, тема %r", len(media), topic_tag)
+    return threads_api.publish(text, media, topic_tag=topic_tag)
 
 
 def _finalize_instagram(text: str, media_entries: list, chat_id=None):

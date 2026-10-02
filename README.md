@@ -128,7 +128,7 @@ x/
 | `X_SELECT_STRATEGY` | `shortest` | какой вариант текста уходит в X |
 | `X_TEXT_LIMIT` | `280` | лимит символов X |
 | `X_LONG_TEXT_MODE` | `fit` | если текст длиннее лимита: `fit`/`thread`/`skip` |
-| `THREADS_HASHTAGS` | пусто | свои хештеги в конец поста Threads |
+| `THREADS_HASHTAGS` | пусто | тема поста Threads: берётся первый тег и уходит полем `topic_tag` (в Threads один тег на пост), в тексте хештегов не остаётся |
 | `X_HASHTAGS` | пусто | свои хештеги в конец поста X |
 
 ## Длинный текст в X
@@ -153,6 +153,11 @@ x/
 X_HASHTAGS=#cs2 #esports #Coinplay
 THREADS_HASHTAGS=#Coinplay
 ```
+
+**Threads.** Там на пост приходится одна тема. Бот берёт первый тег из
+`THREADS_HASHTAGS` (или из `threads` в `SOURCE_HASHTAGS`) и передаёт его полем
+`topic_tag`; все хештеги из текста убираются, лишние теги не используются.
+Поэтому для Threads лучше задавать один тег на вертикаль, например `#football`.
 
 Формат свободный: `#cs2 #esports` и `cs2, esports` дают одно и то же.
 

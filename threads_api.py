@@ -1,6 +1,7 @@
 """Клиент Threads Graph API."""
 
 import logging
+import re
 import time
 
 import requests
@@ -111,10 +112,22 @@ def _create_item_container(media: dict) -> str:
     return _post(f"{THREADS_USER_ID}/threads", payload)["id"]
 
 
-def _create_container(text: str, media: list, reply_to_id: str = None) -> str:
+def clean_topic_tag(raw: str) -> str:
+    """
+    Тема поста (topic_tag): 1–50 символов, без точек и амперсандов (правила Threads API).
+    '#' в начале убираем — в Threads тема показывается без решётки.
+    """
+    tag = re.sub(r"[.&]", "", (raw or "").lstrip("#"))
+    return re.sub(r"\s+", " ", tag).strip()[:50].strip()
+
+
+def _create_container(text: str, media: list, reply_to_id: str = None,
+                      topic_tag: str = None) -> str:
     payload = {}
     if text:
         payload["text"] = text
+    if topic_tag:
+        payload["topic_tag"] = topic_tag
     if reply_to_id:
         payload["reply_to_id"] = reply_to_id
 
@@ -141,10 +154,13 @@ def _create_container(text: str, media: list, reply_to_id: str = None) -> str:
     return container_id
 
 
-def publish(text: str, media: list) -> list:
+def publish(text: str, media: list, topic_tag: str = None) -> list:
     """
     Публикует пост. Длинный текст уходит связанным тредом,
     медиа прикрепляется к первому посту треда.
+
+    topic_tag — единственная тема поста (в Threads она одна на пост). Ставится
+    на первый пост треда; хештеги в тексте для этого не нужны.
 
     media: [{"kind": "image"|"video", "url": "https://..."}]
     Возвращает список id опубликованных постов.
@@ -159,7 +175,8 @@ def publish(text: str, media: list) -> list:
 
     for i, chunk in enumerate(chunks):
         chunk_media = media if i == 0 else []
-        container_id = _create_container(chunk, chunk_media, reply_to)
+        container_id = _create_container(chunk, chunk_media, reply_to,
+                                         topic_tag if i == 0 else None)
 
         # Небольшая пауза между созданием и публикацией — требование API.
         time.sleep(2)
