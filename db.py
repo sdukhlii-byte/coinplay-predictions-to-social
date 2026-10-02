@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS seen_messages (
     PRIMARY KEY (chat_id, message_id)
 );
 
+CREATE TABLE IF NOT EXISTS published_matches (
+    match_key  TEXT NOT NULL,
+    ptype      TEXT NOT NULL,
+    platform   TEXT NOT NULL,
+    burst_id   TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (match_key, ptype, platform)
+);
+
 CREATE TABLE IF NOT EXISTS media (
     key        TEXT PRIMARY KEY,
     path       TEXT NOT NULL,
@@ -123,6 +132,67 @@ def mark_seen(chat_id: int, message_id: int) -> bool:
             return True
         except sqlite3.IntegrityError:
             return False
+
+
+# --- Дедупликация по матчу ---
+
+def claim_match(match_key: str, ptype: str, platform: str, burst_id: str,
+                window_seconds: float) -> bool:
+    """
+    Занимает (матч, тип поста, площадка) за пачкой. True — можно публиковать:
+    ключ был свободен, просроченный (другой матч тех же команд) либо уже
+    принадлежит этой же пачке (повтор после ошибки). False — этот пост уже
+    опубликован другой пачкой.
+    """
+    now = time.time()
+    with _lock:
+        row = _conn.execute(
+            "SELECT burst_id, created_at FROM published_matches"
+            " WHERE match_key = ? AND ptype = ? AND platform = ?",
+            (match_key, ptype, platform),
+        ).fetchone()
+        if row is None:
+            _conn.execute(
+                "INSERT INTO published_matches (match_key, ptype, platform, burst_id, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (match_key, ptype, platform, burst_id, now),
+            )
+            _conn.commit()
+            return True
+        if row["burst_id"] == burst_id:
+            return True
+        if now - row["created_at"] >= window_seconds:
+            _conn.execute(
+                "UPDATE published_matches SET burst_id = ?, created_at = ?"
+                " WHERE match_key = ? AND ptype = ? AND platform = ?",
+                (burst_id, now, match_key, ptype, platform),
+            )
+            _conn.commit()
+            return True
+        return False
+
+
+def release_match(match_key: str, ptype: str, platform: str, burst_id: str):
+    """Отдаёт ключ обратно, если публикация не состоялась (ошибка или нечего публиковать)."""
+    with _lock:
+        _conn.execute(
+            "DELETE FROM published_matches"
+            " WHERE match_key = ? AND ptype = ? AND platform = ? AND burst_id = ?",
+            (match_key, ptype, platform, burst_id),
+        )
+        _conn.commit()
+
+
+def defer_burst(burst_id: str, publish_after: float):
+    """Откладывает пачку: часть площадок ждёт своего времени (см. DEDUP_*_GRACE_SECONDS)."""
+    now = time.time()
+    with _lock:
+        _conn.execute(
+            "UPDATE bursts SET status = 'pending', publish_after = ?, updated_at = ?"
+            " WHERE id = ?",
+            (publish_after, now, burst_id),
+        )
+        _conn.commit()
 
 
 # --- Пачки ---

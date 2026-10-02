@@ -10,6 +10,7 @@ import time
 import db
 import hashtags
 import instagram_api
+import match_key
 import post_filter
 import selector
 import stats
@@ -19,6 +20,10 @@ import x_api
 from config import (
     ALLOW_EMPTY_TEXT,
     BURST_WAIT_SECONDS,
+    DEDUP_ENABLED,
+    DEDUP_LEGACY_GRACE_SECONDS,
+    DEDUP_MANIFEST_GRACE_SECONDS,
+    DEDUP_WINDOW_HOURS,
     INSTAGRAM_CAPTION_LIMIT,
     INSTAGRAM_ENABLED,
     INSTAGRAM_HASHTAGS,
@@ -267,6 +272,64 @@ def _has_publishable_text(candidates: list) -> bool:
     )
 
 
+STRATEGIES = {"threads": SELECT_STRATEGY, "instagram": INSTAGRAM_SELECT_STRATEGY, "x": X_SELECT_STRATEGY}
+
+
+def _ready_at(burst: dict, platform: str) -> float:
+    """
+    Когда эту пачку можно публиковать на площадку. Приоритет источников:
+    zip-кит (сразу) > манифест (в Instagram/X через DEDUP_MANIFEST_GRACE_SECONDS,
+    в Threads сразу) > старый текст без манифеста (везде через DEDUP_LEGACY_GRACE_SECONDS).
+    Ждут менее приоритетные, чтобы лучший вариант успел занять ключ матча первым.
+    """
+    if not DEDUP_ENABLED or burst.get("kit"):
+        return 0.0
+    if not burst.get("manifest"):
+        return burst["created_at"] + DEDUP_LEGACY_GRACE_SECONDS
+    if platform in ("instagram", "x"):
+        return burst["created_at"] + DEDUP_MANIFEST_GRACE_SECONDS
+    return 0.0
+
+
+def _claim(burst: dict, platform: str, text: str):
+    """
+    Занимает ключ (матч, тип поста, площадка).
+    Возвращает (разрешено, ключ-или-None). Ключ не определился — публикуем как раньше.
+    """
+    if not DEDUP_ENABLED:
+        return True, None
+    key = match_key.match_key(burst.get("manifest", ""), text)
+    if not key:
+        log.info("Пачка %s: матч не определился — дедупликация пропущена", burst["id"][:8])
+        return True, None
+    ptype = match_key.post_type(text)
+    if db.claim_match(key, ptype, platform, burst["id"], DEDUP_WINDOW_HOURS * 3600):
+        return True, (key, ptype)
+    log.info("Пачка %s: %s/%s %s — уже опубликовано другой пачкой, пропускаю",
+             burst["id"][:8], platform, ptype, key)
+    return False, None
+
+
+def _release(burst: dict, platform: str, claim):
+    if claim:
+        db.release_match(claim[0], claim[1], platform, burst["id"])
+
+
+def _finish(burst: dict) -> bool:
+    """
+    Завершает пачку. Если опубликовать удалось хоть что-то — posted, если всё
+    оказалось дублями — skipped. False — публиковать было нечего (ничего не записано).
+    """
+    results = db.get_results(burst["id"])
+    if not results:
+        return False
+    if not any(results.values()):
+        db.mark_skipped(burst["id"], "дубль: матч уже опубликован другой пачкой")
+        return True
+    db.mark_posted(burst["id"], results.get("threads", []))
+    return True
+
+
 def _process_zip_burst(burst: dict):
     """
     Пачка из готового zip-набора: текст и картинки уже разложены по площадкам
@@ -299,27 +362,30 @@ def _process_zip_burst(burst: dict):
             log.info("Пачка %s: в zip нет варианта для %s — пропускаю площадку",
                       burst["id"][:8], name)
             continue
+        claim = None
         try:
+            ok, claim = _claim(burst, name, plat.get("text", ""))
+            if not ok:
+                db.save_result(burst["id"], name, [])  # дубль — площадка закрыта
+                continue
             ids = FINALIZERS[name](plat.get("text", ""), plat.get("media", []), burst.get("chat_id"))
             if ids is None:
+                _release(burst, name, claim)
                 continue
             db.save_result(burst["id"], name, ids)
             log.info("%s: опубликовано %s", name, ids)
         except Exception as e:
+            _release(burst, name, claim)
             log.error("%s: ошибка публикации — %s", name, e)
             errors.append(f"{name}: {e}")
 
     if errors:
         raise RuntimeError("; ".join(errors))
 
-    results = db.get_results(burst["id"])
-    if not results:
+    if not _finish(burst):
         log.info("Пачка %s: публиковать нечего (ни одна площадка не совпала с zip)",
                   burst["id"][:8])
         db.mark_skipped(burst["id"], "ни одна включённая площадка не нашлась в zip")
-        return
-
-    db.mark_posted(burst["id"], results.get("threads", []))
 
 
 def _process_burst(burst: dict):
@@ -358,16 +424,36 @@ def _process_burst(burst: dict):
 
     errors = []
     nothing_to_post = 0
+    deferred = []
+    now = time.time()
 
     for name, publish_fn in pending:
+        claim = None
         try:
+            chosen = selector.choose(burst.get("manifest", ""), candidates, STRATEGIES[name])
+            text = chosen.get("text", "")
+
+            # Ждём приоритетный источник только если матч вообще определяется:
+            # пост без понятной пары команд дубликата иметь не может.
+            if DEDUP_ENABLED and match_key.match_key(burst.get("manifest", ""), text):
+                ready = _ready_at(burst, name)
+                if ready > now:
+                    deferred.append(ready)
+                    continue
+
+            ok, claim = _claim(burst, name, text)
+            if not ok:
+                db.save_result(burst["id"], name, [])  # дубль — площадка закрыта
+                continue
             ids = publish_fn(burst, candidates)
             if ids is None:
+                _release(burst, name, claim)
                 nothing_to_post += 1
                 continue
             db.save_result(burst["id"], name, ids)
             log.info("%s: опубликовано %s", name, ids)
         except Exception as e:
+            _release(burst, name, claim)
             log.error("%s: ошибка публикации — %s", name, e)
             errors.append(f"{name}: {e}")
 
@@ -376,13 +462,17 @@ def _process_burst(burst: dict):
         # и в повторной попытке участвовать не будет.
         raise RuntimeError("; ".join(errors))
 
-    results = db.get_results(burst["id"])
-    if not results:
-        log.info("Пачка %s: публиковать нечего", burst["id"][:8])
-        db.mark_skipped(burst["id"], "нет текста с фразой-маркером")
+    if deferred:
+        # Менее приоритетный источник ждёт, пока кит/манифест займёт ключ матча.
+        when = min(deferred)
+        log.info("Пачка %s: жду приоритетный источник ещё %.0f сек (для %d площадок)",
+                 burst["id"][:8], when - now, len(deferred))
+        db.defer_burst(burst["id"], when)
         return
 
-    db.mark_posted(burst["id"], results.get("threads", []))
+    if not _finish(burst):
+        log.info("Пачка %s: публиковать нечего", burst["id"][:8])
+        db.mark_skipped(burst["id"], "нет текста с фразой-маркером")
 
 
 def _cleanup_media():

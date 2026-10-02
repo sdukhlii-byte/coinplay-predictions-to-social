@@ -107,7 +107,25 @@ STRIP_FILTER_PHRASE = _opt("STRIP_FILTER_PHRASE", "false").lower() == "true"
 # ("... needs a human because: panel split 5-5 of 10 ..."), которые
 # утекают в кит как обычный текст площадки, когда панель моделей
 # разошлась и бот сам просит ручную проверку вместо публикации.
-POST_EXCLUDE_PHRASE = _opt("POST_EXCLUDE_PHRASE", "needs a human")
+# "rehearsal"/"lynaix" — тестовые прогоны предиктора (REHEARSAL LYNAIX-524):
+# такие посты не должны попадать в соцсети.
+POST_EXCLUDE_PHRASE = _opt("POST_EXCLUDE_PHRASE", "needs a human|rehearsal|lynaix")
+
+# --- Защита от дублей ---
+# Один матч приходит несколькими путями (zip-кит, манифест + фото, старый
+# текст без манифеста). Перед публикацией пост "занимает" ключ
+# (матч + тип поста + площадка); второй такой же пост пропускается.
+DEDUP_ENABLED = _opt("DEDUP_ENABLED", "true").lower() == "true"
+# Сколько часов занятый ключ считается актуальным. Дольше — это уже другой
+# матч тех же команд.
+DEDUP_WINDOW_HOURS = float(_opt("DEDUP_WINDOW_HOURS", "18"))
+# Приоритет источников: zip-кит > манифест > старый текст. Чтобы лучший
+# вариант успел прийти, менее приоритетные ждут:
+#  - старый текст без манифеста — перед публикацией куда угодно;
+#  - манифест — перед публикацией в Instagram и X (в Threads идёт сразу).
+# Старый текст обычно опережает кит минут на 13, поэтому по умолчанию 25 минут.
+DEDUP_LEGACY_GRACE_SECONDS = int(_opt("DEDUP_LEGACY_GRACE_SECONDS", "1500"))
+DEDUP_MANIFEST_GRACE_SECONDS = int(_opt("DEDUP_MANIFEST_GRACE_SECONDS", "300"))
 
 # --- Схлопывание дублей ---
 # Один матч приходит несколькими вариантами подряд (instagram, x, длинный).
