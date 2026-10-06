@@ -213,6 +213,18 @@ ALLOW_EMPTY_TEXT = _opt("ALLOW_EMPTY_TEXT", "true").lower() == "true"
 # обычно). Включить обратно — поставить true.
 VIDEO_KIT_ENABLED = _opt("VIDEO_KIT_ENABLED", "true").lower() == "true"
 
+# Генератор видео (ai-match-lab, режим --serve). Если задан, каждый zip-кит бота
+# (в архиве есть blank/blank.json) дополнительно пересылается ему POST'ом на
+# {VIDEO_GENERATOR_URL}/kit — он делает видео и кладёт готовый кит в группу,
+# которую мы читаем. Пусто — пересылка выключена. Токен тот же, что KIT_API_TOKEN
+# у генератора. Внутри одного Railway-проекта удобнее приватный адрес вида
+# http://ai-match-lab.railway.internal:8080 (без публичного домена).
+VIDEO_GENERATOR_URL = _opt("VIDEO_GENERATOR_URL").rstrip("/")
+VIDEO_GENERATOR_TOKEN = _opt("VIDEO_GENERATOR_TOKEN")
+
+if VIDEO_GENERATOR_URL and not VIDEO_GENERATOR_TOKEN:
+    raise RuntimeError("VIDEO_GENERATOR_URL задан, а VIDEO_GENERATOR_TOKEN — нет")
+
 # X: публиковать пост, только если в нём есть хотя бы одна картинка.
 # Постов "голым текстом" в X быть не должно.
 X_REQUIRE_IMAGE = _opt("X_REQUIRE_IMAGE", "true").lower() == "true"

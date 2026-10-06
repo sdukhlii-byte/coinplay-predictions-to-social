@@ -18,6 +18,7 @@ from telethon.sessions import StringSession
 import db
 import post_filter
 import selector
+import video_bridge
 from config import (
     BURST_WAIT_SECONDS,
     BURST_WINDOW_SECONDS,
@@ -144,6 +145,14 @@ async def _handle_zip(message, chat_id: int) -> None:
     except Exception as e:
         log.error("Не удалось скачать zip-набор из msg %s: %s", message.id, e)
         return
+
+    # Копия кита бота (с blank/blank.json) — генератору видео. Не блокирует и
+    # не ломает публикацию: ошибки только в лог (см. video_bridge).
+    try:
+        name = (message.file.name if message.file and message.file.name else "") or "kit.zip"
+        await asyncio.to_thread(video_bridge.forward_kit, zip_path, name)
+    except Exception as e:
+        log.warning("msg %s: пересылка кита генератору упала: %s", message.id, e)
 
     try:
         with zipfile.ZipFile(zip_path) as zf:
