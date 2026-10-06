@@ -12,7 +12,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 import db
 import instagram_api
@@ -138,8 +138,15 @@ def health():
 
 
 @app.get("/status")
-def status():
-    return {"queue": db.stats(), "recent": db.recent_bursts(20)}
+def status(limit: int = 20, status: str = ""):
+    """Очередь и последние пачки. ?status=failed — только упавшие (с причиной
+    error), ?limit=100 — больше записей. У каждой пачки есть chat_id источника
+    и format (kit / manifest / legacy)."""
+    limit = max(1, min(limit, 200))
+    body = {"queue": db.stats(), "recent": db.recent_bursts(limit, status.strip())}
+    # явный UTF-8: без charset Safari показывал кириллицу кракозябрами
+    return Response(json.dumps(body, ensure_ascii=False),
+                    media_type="application/json; charset=utf-8")
 
 
 @app.get("/dialogs")

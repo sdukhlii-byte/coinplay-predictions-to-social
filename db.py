@@ -450,12 +450,15 @@ def stats() -> dict:
     return {r["status"]: r["n"] for r in rows}
 
 
-def recent_bursts(limit: int = 20) -> list:
+def recent_bursts(limit: int = 20, status: str = "") -> list:
+    """Последние пачки (новые сверху). status — фильтр: posted/skipped/failed/…"""
+    where, args = ("WHERE status = ? ", [status]) if status else ("", [])
     with _lock:
         rows = _conn.execute(
-            "SELECT id, status, attempts, error, candidates, results, manifest,"
-            " kit, created_at FROM bursts ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            "SELECT id, chat_id, status, attempts, error, candidates, results, manifest,"
+            " kit, created_at, updated_at FROM bursts " + where +
+            "ORDER BY created_at DESC LIMIT ?",
+            (*args, limit),
         ).fetchall()
     out = []
     for r in rows:
@@ -467,6 +470,7 @@ def recent_bursts(limit: int = 20) -> list:
             d["results"] = {}
         manifest = d.pop("manifest", "") or ""
         kit_raw = d.pop("kit", None)
+        d["format"] = "kit" if kit_raw else ("manifest" if manifest else "legacy")
         kit = None
         if kit_raw:
             try:
