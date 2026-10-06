@@ -22,6 +22,7 @@ import telegram_source
 import threads_api
 import worker
 import x_api
+import youtube_api
 from config import (
     ADMIN_TOKEN,
     DATA_DIR,
@@ -33,6 +34,7 @@ from config import (
     THREADS_ENABLED,
     X_ENABLED,
     X_SELECT_STRATEGY,
+    YOUTUBE_ENABLED,
 )
 
 logging.basicConfig(
@@ -89,6 +91,15 @@ async def lifespan(app: FastAPI):
             log.error("Не удалось проверить ключи X: %s", e)
     else:
         log.info("X отключён (X_ENABLED=false)")
+
+    if YOUTUBE_ENABLED:
+        try:
+            youtube_api.check()
+            log.info("YouTube: токен канала получен")
+        except Exception as e:
+            log.error("Не удалось получить токен YouTube: %s", e)
+    else:
+        log.info("YouTube отключён (YOUTUBE_ENABLED=false)")
 
     if post_filter.ENABLED:
         log.info("Фильтр: публикуются только посты с %r", POST_FILTER_PHRASE)

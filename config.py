@@ -97,6 +97,25 @@ MEDIA_DIR = _opt("MEDIA_DIR", os.path.join(DATA_DIR, "media"))
 # --- Фильтр постов ---
 # Публиковать только посты с этой фразой. Пусто = все.
 # Несколько вариантов через | (сработает любой).
+# --- YouTube (Shorts) ---
+# OAuth refresh-токен канала: получить один раз скриптом youtube_auth.py.
+# Клиент (Desktop app) создаётся в Google Cloud -> Google Auth Platform -> Clients.
+# Пока проект не прошёл аудит YouTube API, видео, загруженные через API, YouTube
+# делает приватными — это ограничение Google.
+YOUTUBE_ENABLED = _opt("YOUTUBE_ENABLED", "false").lower() == "true"
+YOUTUBE_CLIENT_ID = _opt("YOUTUBE_CLIENT_ID")
+YOUTUBE_CLIENT_SECRET = _opt("YOUTUBE_CLIENT_SECRET")
+YOUTUBE_REFRESH_TOKEN = _opt("YOUTUBE_REFRESH_TOKEN")
+YOUTUBE_PRIVACY = _opt("YOUTUBE_PRIVACY", "public").lower()
+YOUTUBE_CATEGORY_ID = _opt("YOUTUBE_CATEGORY_ID", "17")  # 17 = Sports
+if YOUTUBE_ENABLED and not all([YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN]):
+    raise RuntimeError(
+        "YOUTUBE_ENABLED=true, но заданы не все ключи: "
+        "YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET / YOUTUBE_REFRESH_TOKEN"
+    )
+if YOUTUBE_PRIVACY not in ("public", "unlisted", "private"):
+    raise RuntimeError("YOUTUBE_PRIVACY: допустимо public, unlisted или private")
+
 POST_FILTER_PHRASE = _opt("POST_FILTER_PHRASE", "")
 # Вырезать фразу-маркер из текста перед публикацией.
 STRIP_FILTER_PHRASE = _opt("STRIP_FILTER_PHRASE", "false").lower() == "true"
@@ -126,10 +145,10 @@ POST_EXCLUDE_PHRASE = _opt("POST_EXCLUDE_PHRASE", "needs a human|rehearsal|lynai
 #     "-1003996941088": {"manifest": ["threads"]},
 #     "-1003952139185": {"manifest": ["threads"]}
 #   }
-_PLATFORM_NAMES = {"threads", "instagram", "x"}
+_PLATFORM_NAMES = {"threads", "instagram", "x", "youtube"}
 _FORMATS = ("kit", "manifest", "legacy")
 ROUTING_DEFAULT = {
-    "kit": ["instagram", "x"],
+    "kit": ["instagram", "x", "youtube"],
     "manifest": ["threads", "instagram", "x"],
     "legacy": [],
 }
@@ -151,7 +170,7 @@ def _parse_routing(raw: str) -> dict:
                 names = [str(p).lower() for p in platforms]
                 bad = [p for p in names if p not in _PLATFORM_NAMES]
                 if bad:
-                    raise ValueError(f"неизвестная площадка {bad} (допустимо: threads, instagram, x)")
+                    raise ValueError(f"неизвестная площадка {bad} (допустимо: threads, instagram, x, youtube)")
                 out[key][fmt] = names
         return out
     except Exception as e:

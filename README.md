@@ -111,6 +111,32 @@ x/
 - Если у одного матча есть и картинки (исходный кит), и видео (кит генератора),
   в соцсети уйдут оба поста: общей дедупликации между источниками нет.
 
+## YouTube Shorts
+
+Видео из zip-кита (платформа `youtube` в `kit.json`) грабер загружает на канал
+через YouTube Data API v3 (`youtube_api.py`). В `youtube/post.txt` первая строка —
+название, остальное — описание.
+
+1. Google Cloud: включить YouTube Data API v3, scope `youtube.upload`, OAuth-клиент
+   типа Desktop app, статус приложения In production.
+2. Один раз на своём компьютере: `python3 youtube_auth.py client_secret_….json` —
+   войти аккаунтом канала, скрипт выведет `YOUTUBE_REFRESH_TOKEN`.
+3. Переменные в Railway:
+
+| Переменная | Что это |
+|---|---|
+| `YOUTUBE_ENABLED` | `true` включает площадку |
+| `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` | из JSON клиента |
+| `YOUTUBE_REFRESH_TOKEN` | из `youtube_auth.py` |
+| `YOUTUBE_PRIVACY` | `public` (по умолчанию), `unlisted` или `private` |
+| `YOUTUBE_CATEGORY_ID` | по умолчанию `17` (Sports) |
+
+- Пока проект не прошёл аудит YouTube API Services, YouTube делает видео, загруженные
+  через API, приватными — открыть вручную в YouTube Studio. Дневная квота по умолчанию
+  ограничивает число загрузок.
+- Маршрутизация: `youtube` по умолчанию включён для `kit`; менять через `ROUTING`.
+- Тесты: `python -m pytest tests -q`.
+
 ## Переменные окружения
 
 ### Обязательные

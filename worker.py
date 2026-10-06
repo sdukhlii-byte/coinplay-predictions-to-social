@@ -17,6 +17,7 @@ import stats
 import telegram_source
 import threads_api
 import x_api
+import youtube_api
 from config import (
     ALLOW_EMPTY_TEXT,
     BURST_WAIT_SECONDS,
@@ -44,6 +45,7 @@ from config import (
     THREADS_TEXT_LIMIT,
     WORKER_INTERVAL_SECONDS,
     X_ENABLED,
+    YOUTUBE_ENABLED,
     X_HASHTAGS,
     X_LONG_TEXT_MODE,
     X_REQUIRE_IMAGE,
@@ -208,7 +210,16 @@ def _finalize_x(text: str, media_entries: list, chat_id=None):
     return x_api.publish(text, media_entries)
 
 
-FINALIZERS = {"threads": _finalize_threads, "instagram": _finalize_instagram, "x": _finalize_x}
+def _finalize_youtube(text: str, media_entries: list, chat_id=None):
+    # В YouTube — только видео (Shorts); без видео площадку пропускаем.
+    if not any(m.get("kind") == "video" for m in media_entries):
+        log.info("YouTube: в пачке нет видео — пропускаю площадку")
+        return None
+    return youtube_api.publish(text, media_entries)
+
+
+FINALIZERS = {"threads": _finalize_threads, "instagram": _finalize_instagram,
+              "x": _finalize_x, "youtube": _finalize_youtube}
 
 
 def _publish_threads(burst: dict, candidates: list) -> list:
@@ -267,6 +278,15 @@ if X_ENABLED:
     PUBLISHERS.append(("x", _publish_x))
 
 
+def _publish_youtube(burst: dict, candidates: list):
+    # Только zip-киты (в них видео разложено по площадкам); манифесты — нет.
+    return None
+
+
+if YOUTUBE_ENABLED:
+    PUBLISHERS.append(("youtube", _publish_youtube))
+
+
 def _has_publishable_text(candidates: list) -> bool:
     return any(
         c.get("text") and post_filter.matches(c["text"])
@@ -290,7 +310,8 @@ def _allowed_platforms(burst: dict) -> set:
     return set(ROUTING_DEFAULT[fmt])
 
 
-STRATEGIES = {"threads": SELECT_STRATEGY, "instagram": INSTAGRAM_SELECT_STRATEGY, "x": X_SELECT_STRATEGY}
+STRATEGIES = {"threads": SELECT_STRATEGY, "instagram": INSTAGRAM_SELECT_STRATEGY,
+              "x": X_SELECT_STRATEGY, "youtube": SELECT_STRATEGY}
 
 
 def _ready_at(burst: dict, platform: str) -> float:
