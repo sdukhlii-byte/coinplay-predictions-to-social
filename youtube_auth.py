@@ -19,7 +19,9 @@ import webbrowser
 
 import requests
 
-SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+# upload — заливка видео; readonly — чтение просмотров/лайков для статистики.
+SCOPE = ("https://www.googleapis.com/auth/youtube.upload "
+         "https://www.googleapis.com/auth/youtube.readonly")
 
 
 def main() -> int:

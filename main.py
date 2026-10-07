@@ -84,11 +84,13 @@ async def lifespan(app: FastAPI):
         log.info("Instagram отключён (INSTAGRAM_ENABLED=false)")
 
     if X_ENABLED:
-        try:
-            me = x_api.whoami()
-            log.info("X-аккаунт: @%s (id %s)", me.get("username"), me.get("id"))
-        except Exception as e:
-            log.error("Не удалось проверить ключи X: %s", e)
+        for label, acc in x_api.all_accounts():
+            try:
+                me = x_api.whoami(acc)
+                log.info("X-аккаунт (%s): @%s (id %s)",
+                         label, me.get("username"), me.get("id"))
+            except Exception as e:
+                log.error("Не удалось проверить ключи X (%s): %s", label, e)
     else:
         log.info("X отключён (X_ENABLED=false)")
 

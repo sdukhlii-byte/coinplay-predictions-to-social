@@ -18,10 +18,8 @@ from requests_oauthlib import OAuth1
 
 import db
 from config import (
-    X_ACCESS_SECRET,
-    X_ACCESS_TOKEN,
-    X_API_KEY,
-    X_API_SECRET,
+    X_ACCOUNTS,
+    X_DEFAULT_ACCOUNT,
     X_TEXT_LIMIT,
 )
 
@@ -45,18 +43,40 @@ class XError(RuntimeError):
     pass
 
 
-def _auth() -> OAuth1:
-    return OAuth1(X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET)
+def account_for(chat_id) -> dict:
+    """Ключи X для источника: свой из X_ACCOUNTS, иначе основной, иначе None."""
+    if chat_id is not None:
+        acc = X_ACCOUNTS.get(str(chat_id))
+        if acc:
+            return acc
+    return X_DEFAULT_ACCOUNT
 
 
-def whoami() -> dict:
-    r = requests.get(ME_URL, auth=_auth(), timeout=30)
+def all_accounts() -> list:
+    """[(метка, ключи)] — для проверки при старте и для отчёта."""
+    out = []
+    if X_DEFAULT_ACCOUNT:
+        out.append(("основной", X_DEFAULT_ACCOUNT))
+    out.extend((f"источник {cid}", acc) for cid, acc in X_ACCOUNTS.items())
+    return out
+
+
+def _auth(account: dict = None) -> OAuth1:
+    acc = account or X_DEFAULT_ACCOUNT
+    if not acc:
+        raise XError("Нет ключей X для этого аккаунта")
+    return OAuth1(acc["api_key"], acc["api_secret"],
+                  acc["access_token"], acc["access_secret"])
+
+
+def whoami(account: dict = None) -> dict:
+    r = requests.get(ME_URL, auth=_auth(account), timeout=30)
     if r.status_code >= 400:
         raise XError(f"GET users/me -> {r.status_code}: {r.text[:300]}")
     return r.json().get("data", {})
 
 
-def get_metrics(tweet_ids: list) -> dict:
+def get_metrics(tweet_ids: list, account: dict = None) -> dict:
     """
     Просмотры и лайки для списка твитов. X отдаёт метрики батчами
     до 100 id за один запрос — дороже по деньгам не становится
@@ -69,7 +89,7 @@ def get_metrics(tweet_ids: list) -> dict:
         batch = tweet_ids[i:i + 100]
         r = requests.get(
             TWEETS_URL,
-            auth=_auth(),
+            auth=_auth(account),
             params={"ids": ",".join(batch), "tweet.fields": "public_metrics"},
             timeout=30,
         )
@@ -156,18 +176,18 @@ def split_text(text: str, limit: int = X_TEXT_LIMIT) -> list:
     return [f"{p} ({i + 1}/{total})" for i, p in enumerate(parts)] if total > 1 else parts
 
 
-def _upload_media(path: str) -> str:
+def _upload_media(path: str, account: dict = None) -> str:
     """Загружает файл и возвращает media_id. X забирает файл напрямую, не по URL."""
     if not os.path.exists(path):
         raise XError(f"Файл не найден: {path}")
 
     if os.path.splitext(path)[1].lower() in _VIDEO_EXTS:
-        return _upload_video(path)
+        return _upload_video(path, account)
 
     with open(path, "rb") as f:
         r = requests.post(
             MEDIA_UPLOAD_URL,
-            auth=_auth(),
+            auth=_auth(account),
             files={"media": f},
             timeout=120,
         )
@@ -180,7 +200,7 @@ def _upload_media(path: str) -> str:
     return media_id
 
 
-def _upload_video(path: str) -> str:
+def _upload_video(path: str, account: dict = None) -> str:
     """
     Загрузка видео по протоколу INIT -> APPEND* -> FINALIZE -> опрос STATUS.
 
@@ -194,7 +214,7 @@ def _upload_video(path: str) -> str:
 
     r = requests.post(
         MEDIA_UPLOAD_URL,
-        auth=_auth(),
+        auth=_auth(account),
         data={
             "command": "INIT",
             "total_bytes": total_bytes,
@@ -217,7 +237,7 @@ def _upload_video(path: str) -> str:
                 break
             r = requests.post(
                 MEDIA_UPLOAD_URL,
-                auth=_auth(),
+                auth=_auth(account),
                 data={
                     "command": "APPEND",
                     "media_id": media_id,
@@ -235,7 +255,7 @@ def _upload_video(path: str) -> str:
 
     r = requests.post(
         MEDIA_UPLOAD_URL,
-        auth=_auth(),
+        auth=_auth(account),
         data={"command": "FINALIZE", "media_id": media_id},
         timeout=60,
     )
@@ -248,7 +268,7 @@ def _upload_video(path: str) -> str:
         time.sleep(processing.get("check_after_secs", 3))
         r = requests.get(
             MEDIA_UPLOAD_URL,
-            auth=_auth(),
+            auth=_auth(account),
             params={"command": "STATUS", "media_id": media_id},
             timeout=30,
         )
@@ -263,7 +283,8 @@ def _upload_video(path: str) -> str:
     return media_id
 
 
-def _create_tweet(text: str, media_ids: list = None, reply_to: str = None) -> str:
+def _create_tweet(text: str, media_ids: list = None, reply_to: str = None,
+                  account: dict = None) -> str:
     payload = {}
     if text:
         payload["text"] = text
@@ -272,14 +293,14 @@ def _create_tweet(text: str, media_ids: list = None, reply_to: str = None) -> st
     if reply_to:
         payload["reply"] = {"in_reply_to_tweet_id": reply_to}
 
-    r = requests.post(TWEETS_URL, auth=_auth(), json=payload, timeout=60)
+    r = requests.post(TWEETS_URL, auth=_auth(account), json=payload, timeout=60)
     if r.status_code >= 400:
         raise XError(f"POST tweets -> {r.status_code}: {r.text[:400]}")
 
     return r.json()["data"]["id"]
 
 
-def publish(text: str, media_entries: list) -> list:
+def publish(text: str, media_entries: list, account: dict = None) -> list:
     """
     Публикует пост в X. Длинный текст уходит тредом,
     медиа прикрепляется к первому посту.
@@ -299,13 +320,13 @@ def publish(text: str, media_entries: list) -> list:
         if not record:
             log.warning("Медиа %s не найдено в базе", entry["key"])
             continue
-        media_ids.append(_upload_media(record["path"]))
+        media_ids.append(_upload_media(record["path"], account))
 
     published, reply_to = [], None
 
     for i, chunk in enumerate(chunks):
         ids = media_ids if i == 0 else None
-        tweet_id = _create_tweet(chunk, ids, reply_to)
+        tweet_id = _create_tweet(chunk, ids, reply_to, account)
         published.append(tweet_id)
         reply_to = tweet_id
         if i < len(chunks) - 1:

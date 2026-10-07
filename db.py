@@ -529,8 +529,12 @@ def delete_media(key: str):
 
 def posted_since(cutoff_ts: float) -> list:
     """
-    Опубликованные (status='posted') пачки не раньше cutoff_ts — источник
-    для сбора статистики: 'results' содержит id постов по каждой площадке
+    Пачки, в которых уже есть хотя бы один опубликованный пост, не раньше
+    cutoff_ts — источник для сбора статистики. Статус не важен: если одна
+    площадка (например X без кредитов) валит пачку в retry/failed, посты,
+    которые уже вышли в Instagram/Threads/YouTube, всё равно должны попадать
+    в отчёт. Раньше фильтр был status='posted', из-за чего отчёт показывал
+    нули при реально опубликованных постах. Здесь 'results' содержит id постов по каждой площадке
     ({'threads': [...], 'instagram': [...], 'x': [...]}).
 
     chat_id/manifest/kit тоже отдаются — чтобы в отчёте было видно не только
@@ -540,7 +544,8 @@ def posted_since(cutoff_ts: float) -> list:
     with _lock:
         rows = _conn.execute(
             "SELECT id, chat_id, manifest, kit, results, updated_at FROM bursts"
-            " WHERE status = 'posted' AND updated_at >= ?"
+            " WHERE updated_at >= ? AND results IS NOT NULL"
+            " AND results NOT IN ('', '{}', '[]', 'null')"
             " ORDER BY updated_at",
             (cutoff_ts,),
         ).fetchall()

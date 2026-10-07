@@ -179,6 +179,13 @@ def _finalize_x(text: str, media_entries: list, chat_id=None):
     text = _clean_text(text)
     raw_tags = _hashtags_for("x", chat_id, X_HASHTAGS)
 
+    # Какой X-аккаунт отвечает за этот источник (X_ACCOUNTS / основной).
+    account = x_api.account_for(chat_id)
+    if account is None:
+        log.info("X: для источника %s нет аккаунта (нет в X_ACCOUNTS, основной "
+                 "не задан) — пропускаю площадку", chat_id)
+        return None
+
     # В X нужны только посты с картинкой — ни голого текста, ни видео.
     # (Видео туда в принципе почти никогда не должно долетать: генератор
     # видео сейчас отключён через VIDEO_KIT_ENABLED, а тут — подстраховка
@@ -207,7 +214,7 @@ def _finalize_x(text: str, media_entries: list, chat_id=None):
         return None
 
     log.info("X: публикую (%d симв.), медиа %d", len(text), len(media_entries))
-    return x_api.publish(text, media_entries)
+    return x_api.publish(text, media_entries, account)
 
 
 def _finalize_youtube(text: str, media_entries: list, chat_id=None):

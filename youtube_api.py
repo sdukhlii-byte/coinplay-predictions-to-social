@@ -4,7 +4,8 @@
 не мешает и подстраховывает.
 
 Авторизация — OAuth refresh-токен канала (получается один раз скриптом
-youtube_auth.py). Нужен только scope youtube.upload.
+youtube_auth.py). Нужны scope youtube.upload (заливка) и youtube.readonly
+(просмотры/лайки для отчёта статистики; без него работает YOUTUBE_API_KEY).
 
 ВАЖНО: пока проект Google Cloud не прошёл аудит YouTube API Services, видео,
 загруженные через API, YouTube принудительно делает приватными. Это
@@ -25,6 +26,7 @@ import requests
 
 import db
 from config import (
+    YOUTUBE_API_KEY,
     YOUTUBE_CATEGORY_ID,
     YOUTUBE_CLIENT_ID,
     YOUTUBE_CLIENT_SECRET,
@@ -36,6 +38,7 @@ log = logging.getLogger("youtube")
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
+VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 TITLE_LIMIT = 100          # лимит YouTube на название
 DESCRIPTION_LIMIT = 4900   # лимит 5000 байт, берём с запасом
 HTTP_TIMEOUT = 30
@@ -152,3 +155,41 @@ def publish(text: str, media_entries: list) -> list:
         raise YouTubeError("YouTube не вернул id видео")
     log.info("YouTube: готово https://youtube.com/shorts/%s", video_id)
     return [video_id]
+
+
+def get_metrics(video_ids: list) -> dict:
+    """Просмотры и лайки видео: {video_id: {"views": N, "likes": N}}.
+
+    videos.list отдаёт до 50 id за запрос и стоит 1 единицу квоты. Сначала
+    пробуем OAuth-токен канала (нужен scope youtube.readonly — работает и для
+    приватных видео); если у токена такого права нет (403) и задан
+    YOUTUBE_API_KEY — читаем публичные видео по ключу. Видео, которых в ответе
+    нет (приватные при чтении по ключу, удалённые), просто не попадают в
+    результат.
+    """
+    out = {}
+    for i in range(0, len(video_ids), 50):
+        batch = video_ids[i:i + 50]
+        params = {"part": "statistics", "id": ",".join(batch)}
+        try:
+            r = requests.get(VIDEOS_URL, params=params, timeout=HTTP_TIMEOUT,
+                             headers={"Authorization": f"Bearer {access_token()}"})
+        except requests.RequestException as e:
+            raise YouTubeError(f"videos.list: сеть недоступна ({type(e).__name__})") from None
+        if r.status_code == 403 and YOUTUBE_API_KEY:
+            try:
+                r = requests.get(VIDEOS_URL, params={**params, "key": YOUTUBE_API_KEY},
+                                 timeout=HTTP_TIMEOUT)
+            except requests.RequestException as e:
+                raise YouTubeError(f"videos.list: сеть недоступна ({type(e).__name__})") from None
+        if r.status_code == 403:
+            raise YouTubeError(
+                "videos.list 403: у токена нет права youtube.readonly — перевыпусти "
+                "youtube_auth.py или задай YOUTUBE_API_KEY (" + _api_error(r) + ")")
+        if r.status_code >= 400:
+            raise YouTubeError(f"videos.list: {_api_error(r)}")
+        for item in r.json().get("items", []):
+            st = item.get("statistics") or {}
+            out[item["id"]] = {"views": int(st.get("viewCount", 0) or 0),
+                               "likes": int(st.get("likeCount", 0) or 0)}
+    return out
