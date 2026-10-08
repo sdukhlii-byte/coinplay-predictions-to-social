@@ -337,7 +337,7 @@ def _ready_at(burst: dict, platform: str) -> float:
     return 0.0
 
 
-def _claim(burst: dict, platform: str, text: str):
+def _claim(burst: dict, platform: str, text: str, media=None):
     """
     Занимает ключ (матч, тип поста, площадка).
     Возвращает (разрешено, ключ-или-None). Ключ не определился — публикуем как раньше.
@@ -349,6 +349,11 @@ def _claim(burst: dict, platform: str, text: str):
         log.info("Пачка %s: матч не определился — дедупликация пропущена", burst["id"][:8])
         return True, None
     ptype = match_key.post_type(text)
+    # Видео (Reels / Shorts) и картинка/текст по одному матчу — разные посты:
+    # иначе картиночный кит занимает слот Instagram, и Reel генератора
+    # отбрасывался как «дубль».
+    if any((m or {}).get("kind") == "video" for m in (media or [])):
+        ptype += "+video"
     if db.claim_match(key, ptype, platform, burst["id"], DEDUP_WINDOW_HOURS * 3600):
         return True, (key, ptype)
     log.info("Пачка %s: %s/%s %s — уже опубликовано другой пачкой, пропускаю",
@@ -414,7 +419,7 @@ def _process_zip_burst(burst: dict):
             continue
         claim = None
         try:
-            ok, claim = _claim(burst, name, plat.get("text", ""))
+            ok, claim = _claim(burst, name, plat.get("text", ""), plat.get("media", []))
             if not ok:
                 db.save_result(burst["id"], name, [])  # дубль — площадка закрыта
                 continue

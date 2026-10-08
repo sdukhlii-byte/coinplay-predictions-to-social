@@ -78,3 +78,17 @@ def test_youtube_error_reason_shown_in_report(env, monkeypatch):
     monkeypatch.setattr(stats.youtube_api, "get_metrics", boom)
     text = stats.format_text(stats.collect(1))
     assert "youtube.readonly" in text
+
+
+def test_video_kit_does_not_collide_with_image_kit_dedupe(env):
+    import importlib, sys
+    sys.modules.pop("worker", None)
+    import worker
+    b1 = {"id": "img1", "manifest": "zipkit · social kit: A vs B", "chat_id": "-1"}
+    b2 = {"id": "vid1", "manifest": "zipkit · A vs B", "chat_id": "-2"}
+    txt = "A vs B\nLeague\n\nAI models pick A"
+    ok1, _ = worker._claim(b1, "instagram", txt, [{"kind": "image"}])
+    ok2, _ = worker._claim(b2, "instagram", txt, [{"kind": "video"}])
+    ok3, _ = worker._claim({"id": "img2", "manifest": "zipkit · social kit: A vs B", "chat_id": "-3"},
+                           "instagram", txt, [{"kind": "image"}])
+    assert ok1 and ok2 and not ok3
