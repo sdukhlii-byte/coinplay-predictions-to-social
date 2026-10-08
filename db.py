@@ -381,6 +381,19 @@ def requeue_burst(burst_id: str) -> bool:
     """
     now = time.time()
     with _lock:
+        # Пустой список в results — это «площадка закрыта как дубль», а не
+        # публикация. При ручном повторе такие площадки открываем заново,
+        # иначе пачка, отброшенная дедупликацией, так и не уйдёт.
+        row = _conn.execute("SELECT results FROM bursts WHERE id = ?", (burst_id,)).fetchone()
+        if row and row["results"]:
+            try:
+                res = json.loads(row["results"])
+                kept = {k: v for k, v in res.items() if v}
+                if kept != res:
+                    _conn.execute("UPDATE bursts SET results = ? WHERE id = ?",
+                                  (json.dumps(kept), burst_id))
+            except Exception:
+                pass
         cur = _conn.execute(
             "UPDATE bursts SET status = 'pending', publish_after = 0,"
             " attempts = 0, error = NULL, updated_at = ? WHERE id = ?",

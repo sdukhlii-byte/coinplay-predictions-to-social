@@ -92,3 +92,10 @@ def test_video_kit_does_not_collide_with_image_kit_dedupe(env):
     ok3, _ = worker._claim({"id": "img2", "manifest": "zipkit · social kit: A vs B", "chat_id": "-3"},
                            "instagram", txt, [{"kind": "image"}])
     assert ok1 and ok2 and not ok3
+
+
+def test_requeue_reopens_platforms_closed_as_duplicates(env):
+    db = env
+    _burst(db, "r", "posted", {"instagram": [], "youtube": ["v"]})
+    assert db.requeue_burst("r")
+    assert json.loads(db.get_burst("r")["results"]) == {"youtube": ["v"]}

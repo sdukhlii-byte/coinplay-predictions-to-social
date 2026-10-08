@@ -190,7 +190,7 @@ def admin_requeue(burst_id: str, token: str = ""):
     return {
         "requeued": burst_id,
         "title": (burst.get("manifest") or "").splitlines()[0][:80],
-        "already_posted_to": list(json.loads(burst.get("results") or "{}").keys()),
+        "already_posted_to": [k for k, v in json.loads(burst.get("results") or "{}").items() if v],
     }
 
 
