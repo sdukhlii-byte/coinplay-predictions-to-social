@@ -49,3 +49,32 @@ def test_youtube_metrics_included_in_report(env, monkeypatch):
     assert yt == {"posts": 2, "views": 120, "likes": 7, "errors": 1}
     assert any(p["url"] == "https://www.youtube.com/shorts/vid1" for p in data["posts"])
     assert "YouTube Shorts" in stats.format_text(data)
+
+
+def test_instagram_insights_failure_is_reported_not_zero(env, monkeypatch):
+    db = env
+    _burst(db, "i", "posted", {"instagram": ["m1"]})
+    import stats
+    monkeypatch.setattr(stats, "_account_usernames", lambda: {})
+    monkeypatch.setattr(stats.instagram_api, "get_insights",
+                        lambda mid: {"views": 0, "likes": 3, "url": None,
+                                     "error": "(#10) permission denied"})
+    data = stats.collect(1)
+    ig = data["platforms"]["instagram"]
+    assert ig["errors"] == 1 and "permission" in ig["last_error"]
+    text = stats.format_text(data)
+    assert "без данных" in text and "причина" in text
+
+
+def test_youtube_error_reason_shown_in_report(env, monkeypatch):
+    db = env
+    _burst(db, "y", "posted", {"youtube": ["v1"]})
+    import stats
+
+    def boom(ids):
+        raise RuntimeError("videos.list 403: нет права youtube.readonly")
+
+    monkeypatch.setattr(stats, "_account_usernames", lambda: {})
+    monkeypatch.setattr(stats.youtube_api, "get_metrics", boom)
+    text = stats.format_text(stats.collect(1))
+    assert "youtube.readonly" in text

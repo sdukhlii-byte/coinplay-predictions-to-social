@@ -130,6 +130,7 @@ def collect(days: int = 7) -> dict:
                     metrics.update(x_api.get_metrics(ids, acc))
                 except Exception as e:
                     log.error("X: метрики не получены для %d постов: %s", len(ids), e)
+                    report["x"]["last_error"] = str(e)
             for post_id in x_ids:
                 m = metrics.get(post_id)
                 if m is None:
@@ -159,6 +160,7 @@ def collect(days: int = 7) -> dict:
         except Exception as e:
             log.warning("Threads: метрики %s недоступны: %s", media_id, e)
             report["threads"]["errors"] += 1
+            report["threads"]["last_error"] = str(e)
             _record("threads", media_id, 0, 0, False)
 
     for media_id in index["instagram"]:
@@ -167,10 +169,16 @@ def collect(days: int = 7) -> dict:
             m = instagram_api.get_insights(media_id)
             report["instagram"]["views"] += m.get("views", 0)
             report["instagram"]["likes"] += m.get("likes", 0)
-            _record("instagram", media_id, m.get("views", 0), m.get("likes", 0), True, m.get("url"))
+            ok = not m.get("error")
+            if not ok:
+                # просмотры не пришли — это не «0 просмотров», а «нет данных»
+                report["instagram"]["errors"] += 1
+                report["instagram"]["last_error"] = m["error"]
+            _record("instagram", media_id, m.get("views", 0), m.get("likes", 0), ok, m.get("url"))
         except Exception as e:
             log.warning("Instagram: метрики %s недоступны: %s", media_id, e)
             report["instagram"]["errors"] += 1
+            report["instagram"]["last_error"] = str(e)
             _record("instagram", media_id, 0, 0, False)
 
     # YouTube: просмотры/лайки Shorts одним батч-запросом (до 50 id).
@@ -181,6 +189,7 @@ def collect(days: int = 7) -> dict:
             metrics = youtube_api.get_metrics(yt_ids)
         except Exception as e:
             log.error("YouTube: не удалось получить метрики: %s", e)
+            report["youtube"]["last_error"] = str(e)
             metrics = {}
         for video_id in yt_ids:
             m = metrics.get(video_id)
@@ -242,6 +251,8 @@ def format_text(data: dict) -> str:
         if p["errors"]:
             line += f" (⚠️ {p['errors']} без данных)"
         lines.append(line)
+        if p.get("last_error"):
+            lines.append("причина: " + _html.escape(str(p["last_error"]).replace("\n", " ")[:220]))
         lines.append("")
     return "\n".join(lines).strip()
 

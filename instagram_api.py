@@ -202,18 +202,28 @@ def get_insights(media_id: str) -> dict:
     """
     out = {"views": 0, "likes": 0, "url": None}
 
-    try:
-        data = _get(f"{media_id}/insights", {"metric": "views"})
+    # "views" — основная метрика; если её нет у типа медиа/приложения —
+    # пробуем "reach" (охват), чтобы в отчёте не было ложных нулей.
+    last_err = None
+    for metric in ("views", "reach"):
+        try:
+            data = _get(f"{media_id}/insights", {"metric": metric})
+        except InstagramError as e:
+            last_err = e
+            log.warning("IG insights(%s, %s): недоступны: %s", media_id, metric, e)
+            continue
         for item in data.get("data", []):
-            if item.get("name") != "views":
+            if item.get("name") != metric:
                 continue
             total = item.get("total_value") or {}
             if "value" in total:
                 out["views"] = total["value"]
             elif item.get("values"):
                 out["views"] = item["values"][0].get("value", 0)
-    except InstagramError as e:
-        log.warning("IG insights(%s): просмотры недоступны: %s", media_id, e)
+        last_err = None
+        break
+    if last_err is not None:
+        out["error"] = str(last_err)
 
     try:
         media = _get(media_id, {"fields": "like_count,permalink"})
