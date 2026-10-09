@@ -99,3 +99,15 @@ def test_requeue_reopens_platforms_closed_as_duplicates(env):
     _burst(db, "r", "posted", {"instagram": [], "youtube": ["v"]})
     assert db.requeue_burst("r")
     assert json.loads(db.get_burst("r")["results"]) == {"youtube": ["v"]}
+
+
+def test_language_prefixed_manifest_is_recognized(env):
+    import sys
+    sys.modules.pop("selector", None)
+    import selector
+    text = ("[ES] threads · scoreboard · Racing Club De Lens vs Olympique Lyon\n"
+            "01-picks.png · https://t.me/c/3996941088/2\n02-analysis.png · https://t.me/c/3996941088/3")
+    assert selector.is_manifest(text)
+    info = selector.parse_manifest(text)
+    assert info["type"] == "scoreboard" and info["title"] == "Racing Club De Lens vs Olympique Lyon"
+    assert not selector.is_manifest("Racing Club De Lens vs Olympique Lyon\n01-picks.png")

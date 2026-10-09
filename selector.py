@@ -22,7 +22,9 @@ from config import MANIFEST_TYPES, SELECT_STRATEGY
 log = logging.getLogger("selector")
 
 # threads · <тип> · <матч>   либо   threads · <матч>
-MANIFEST_RE = re.compile(r"^\s*threads\s*[·:\-]\s*(.+)$", re.IGNORECASE)
+# Перед словом threads может стоять метка языка: «[ES] threads · …». Раньше такой
+# манифест не распознавался и целиком уходил в твит как обычный текст.
+MANIFEST_RE = re.compile(r"^\s*(?:\[[A-Za-z]{2,3}\]\s*)?threads\s*[·:\-]\s*(.+)$", re.IGNORECASE)
 FILENAME_RE = re.compile(r"([\w\-. ]+\.(?:png|jpe?g|webp|gif|mp4|mov))", re.IGNORECASE)
 TME_LINK_RE = re.compile(r"https?://t\.me/c/(\d+)/(\d+)")
 
