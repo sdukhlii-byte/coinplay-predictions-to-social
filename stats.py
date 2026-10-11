@@ -19,7 +19,11 @@ import instagram_api
 import threads_api
 import x_api
 import youtube_api
-from config import STATS_CHAT_ID, TELEGRAM_BOT_TOKEN, YOUTUBE_ENABLED
+from config import (INSTAGRAM_ENABLED, STATS_CHAT_ID, STATS_LABEL, TELEGRAM_BOT_TOKEN,
+                    THREADS_ENABLED, X_ENABLED, YOUTUBE_ENABLED)
+
+_ENABLED = {"threads": THREADS_ENABLED, "instagram": INSTAGRAM_ENABLED,
+            "x": X_ENABLED, "youtube": YOUTUBE_ENABLED}
 
 log = logging.getLogger("stats")
 
@@ -47,14 +51,16 @@ def _account_usernames() -> dict:
     """Юзернеймы аккаунтов по площадкам — для подписи в отчёте. Ошибка на
     одной площадке не должна валить остальные, поэтому каждая — отдельный try."""
     out = {}
-    try:
-        out["threads"] = threads_api.whoami().get("username")
-    except Exception as e:
-        log.warning("Threads: не удалось узнать username: %s", e)
-    try:
-        out["instagram"] = instagram_api.whoami().get("username")
-    except Exception as e:
-        log.warning("Instagram: не удалось узнать username: %s", e)
+    if THREADS_ENABLED:
+        try:
+            out["threads"] = threads_api.whoami().get("username")
+        except Exception as e:
+            log.warning("Threads: не удалось узнать username: %s", e)
+    if INSTAGRAM_ENABLED:
+        try:
+            out["instagram"] = instagram_api.whoami().get("username")
+        except Exception as e:
+            log.warning("Instagram: не удалось узнать username: %s", e)
     if YOUTUBE_ENABLED:
         out["youtube"] = "hello-coinplay"
     names = []
@@ -232,12 +238,15 @@ def format_text(data: dict) -> str:
     """
     import html as _html
 
-    lines = [f"📊 Статистика постов за последние {data['days']} дн.", ""]
+    title = f"📊 Статистика постов за последние {data['days']} дн."
+    if STATS_LABEL:
+        title += f" — {_html.escape(STATS_LABEL)}"
+    lines = [title, ""]
     accounts = data.get("accounts") or {}
     for key, label in PLATFORM_LABELS.items():
         p = data["platforms"].get(key, _empty_platform())
-        if key == "youtube" and not (YOUTUBE_ENABLED or p["posts"]):
-            continue  # YouTube не включён — не засоряем отчёт пустой строкой
+        if not (_ENABLED.get(key) or p["posts"]):
+            continue  # площадка выключена и постов нет — не засоряем отчёт
         username = accounts.get(key)
         url = ACCOUNT_URLS.get(key)
         if username and url:

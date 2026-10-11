@@ -11,6 +11,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("TELEGRAM_API_HASH", "h")
     monkeypatch.setenv("TELEGRAM_STRING_SESSION", "s")
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://example.com")
+    monkeypatch.setenv("SOURCE_CHAT_ID", "-100")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     for m in ("config", "db", "stats", "youtube_api", "x_api", "threads_api", "instagram_api"):
         sys.modules.pop(m, None)
@@ -111,3 +112,21 @@ def test_language_prefixed_manifest_is_recognized(env):
     info = selector.parse_manifest(text)
     assert info["type"] == "scoreboard" and info["title"] == "Racing Club De Lens vs Olympique Lyon"
     assert not selector.is_manifest("Racing Club De Lens vs Olympique Lyon\n01-picks.png")
+
+
+def test_report_hides_disabled_platforms_and_shows_label(env, monkeypatch):
+    monkeypatch.setenv("THREADS_ENABLED", "false")
+    monkeypatch.setenv("YOUTUBE_ENABLED", "false")
+    monkeypatch.setenv("INSTAGRAM_ENABLED", "false")
+    monkeypatch.setenv("X_ENABLED", "true")
+    monkeypatch.setenv("X_API_KEY", "k"); monkeypatch.setenv("X_API_SECRET", "s")
+    monkeypatch.setenv("X_ACCESS_TOKEN", "t"); monkeypatch.setenv("X_ACCESS_SECRET", "a")
+    monkeypatch.setenv("STATS_LABEL", "UFC")
+    import sys
+    for m in ("config", "stats"):
+        sys.modules.pop(m, None)
+    import stats
+    monkeypatch.setattr(stats, "_account_usernames", lambda: {"x": "NasimAh83433695"})
+    text = stats.format_text(stats.collect(1))
+    assert "— UFC" in text and "X (" in text
+    assert "Threads" not in text and "Instagram" not in text and "YouTube" not in text

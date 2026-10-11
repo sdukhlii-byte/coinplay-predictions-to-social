@@ -367,6 +367,9 @@ STATS_ENABLED = (
     and bool(TELEGRAM_BOT_TOKEN and STATS_CHAT_ID)
 )
 STATS_INTERVAL_DAYS = int(_opt("STATS_INTERVAL_DAYS", "7"))
+# Подпись отчёта этого сервиса (например "UFC", "Dota 2"): когда у каждой
+# вертикали свой сервис и свой X-аккаунт, по ней видно, чей это отчёт.
+STATS_LABEL = _opt("STATS_LABEL")
 # Не повторять попытку отправки раньше чем через это время после последней
 # (успешной или нет) — защита от долбёжки Instagram/Threads/X API по кругу,
 # если Telegram недоступен (неверный STATS_CHAT_ID, бот не в чате и т.п.).
