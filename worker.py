@@ -13,6 +13,7 @@ import instagram_api
 import match_key
 import post_filter
 import selector
+import recap
 import stats
 import telegram_source
 import threads_api
@@ -581,6 +582,11 @@ def _tick():
     if now - _last_cleanup > 6 * 3600:
         _last_cleanup = now
         _cleanup_media()
+
+    try:
+        recap.tick()
+    except Exception as e:
+        log.error("Recap: сбой: %s", e)
 
     if STATS_ENABLED:
         # last_sent обновляется только при успехе — этим меряем недельный

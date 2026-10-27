@@ -162,6 +162,11 @@ if YOUTUBE_PRIVACY not in ("public", "unlisted", "private"):
     raise RuntimeError("YOUTUBE_PRIVACY: допустимо public, unlisted или private")
 
 POST_FILTER_PHRASE = _opt("POST_FILTER_PHRASE", "")
+# Фильтр zip-китов по имени файла и подписи (POST_FILTER_PHRASE на них не
+# действует). Фразы через "|", регистр не важен. Кит обрабатывается, только
+# если любая фраза есть в имени zip или в подписи к нему. Пример для
+# испанской версии: KIT_FILE_PHRASE=-es.zip|[ES]. Пусто = берутся все киты.
+KIT_FILE_PHRASE = _opt("KIT_FILE_PHRASE", "")
 # Вырезать фразу-маркер из текста перед публикацией.
 STRIP_FILTER_PHRASE = _opt("STRIP_FILTER_PHRASE", "false").lower() == "true"
 
@@ -374,3 +379,37 @@ STATS_LABEL = _opt("STATS_LABEL")
 # (успешной или нет) — защита от долбёжки Instagram/Threads/X API по кругу,
 # если Telegram недоступен (неверный STATS_CHAT_ID, бот не в чате и т.п.).
 STATS_RETRY_COOLDOWN_SECONDS = int(_opt("STATS_RETRY_COOLDOWN_SECONDS", str(3600)))
+
+# --- Итоги прогнозов из CoinPlay API (recap.py) ---
+# Раз в сутки сервис берёт из API проверенные прогнозы (grades) и публикует
+# в Threads/X текстовый пост «итоги вчера», по понедельникам — недельную
+# сводку точности. Работает на любом сервисе, где включены Threads и/или X.
+RECAP_ENABLED = _opt("RECAP_ENABLED", "false").lower() == "true"
+COINPLAY_API_URL = _opt("COINPLAY_API_URL", "https://209.38.103.35/api/v1").rstrip("/")
+COINPLAY_API_KEY = _opt("COINPLAY_API_KEY")
+# API по голому IP со своим сертификатом: вместо отключения проверки TLS
+# закрепляем отпечаток сертификата (sha256, hex, двоеточия можно оставить).
+# Получить: openssl s_client -connect 209.38.103.35:443 </dev/null 2>/dev/null \
+#           | openssl x509 -noout -fingerprint -sha256
+COINPLAY_API_CERT_SHA256 = _opt("COINPLAY_API_CERT_SHA256").replace(":", "").lower()
+# Какие вертикали включать: soccer, ufc, tennis, dota2, cs2, lol, valorant.
+# У сервиса одной вертикали (например X-аккаунт по футболу) — одно значение.
+RECAP_DISCIPLINES = [x.strip().lower() for x in
+                     _opt("RECAP_DISCIPLINES", "soccer,ufc,tennis,dota2,cs2").split(",")
+                     if x.strip()]
+RECAP_LANG = _opt("RECAP_LANG", "es").lower()          # es | en
+RECAP_TZ = _opt("RECAP_TZ", "Europe/Madrid")
+RECAP_HOUR = int(_opt("RECAP_HOUR", "9"))              # час публикации по RECAP_TZ
+RECAP_WEEKLY_DAY = int(_opt("RECAP_WEEKLY_DAY", "0"))  # 0 = понедельник, -1 = выкл.
+# Проценты показываем, только если проверенных прогнозов не меньше порога —
+# на 6 матчах «67%» вводит в заблуждение.
+RECAP_MIN_SAMPLE = int(_opt("RECAP_MIN_SAMPLE", "20"))         # накопленная точность
+RECAP_WEEKLY_MIN_SAMPLE = int(_opt("RECAP_WEEKLY_MIN_SAMPLE", "10"))
+RECAP_FOOTER = _opt("RECAP_FOOTER")                    # необязательная строка в конце
+RECAP_THREADS_TAG = _opt("RECAP_THREADS_TAG", "CoinplayAI")
+RECAP_X_HASHTAGS = _opt("RECAP_X_HASHTAGS")            # например "#CoinplayAI"
+RECAP_DRY_RUN = _opt("RECAP_DRY_RUN", "false").lower() == "true"  # только в лог
+RECAP_RETRY_COOLDOWN_SECONDS = int(_opt("RECAP_RETRY_COOLDOWN_SECONDS", "3600"))
+
+if RECAP_ENABLED and not COINPLAY_API_KEY:
+    raise RuntimeError("RECAP_ENABLED=true, но не задан COINPLAY_API_KEY")

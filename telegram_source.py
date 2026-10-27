@@ -22,6 +22,7 @@ import video_bridge
 from config import (
     BURST_WAIT_SECONDS,
     BURST_WINDOW_SECONDS,
+    KIT_FILE_PHRASE,
     MEDIA_DIR,
     PUBLIC_BASE_URL,
     SOURCE_CHAT_IDS,
@@ -125,6 +126,9 @@ def _is_zip(message) -> bool:
     return False
 
 
+_KIT_PHRASES = [p.strip().lower() for p in KIT_FILE_PHRASE.split("|") if p.strip()]
+
+
 async def _handle_zip(message, chat_id: int) -> None:
     """
     Распаковывает готовый набор из zip (kit.json + картинки + тексты по
@@ -132,6 +136,17 @@ async def _handle_zip(message, chat_id: int) -> None:
     старого формата (манифест + отдельные фото), тут ждать нечего: всё уже
     собрано целиком внутри архива.
     """
+    if _KIT_PHRASES:
+        try:
+            fname = (message.file.name if message.file and message.file.name else "")
+        except Exception:
+            fname = ""
+        haystack = f"{fname}\n{message.text or message.message or ''}".lower()
+        if not any(ph in haystack for ph in _KIT_PHRASES):
+            log.info("msg %s: кит %r не подходит под KIT_FILE_PHRASE — пропускаю",
+                     message.id, fname)
+            return
+
     tmp_dir = os.path.join(MEDIA_DIR, "kits", uuid.uuid4().hex)
     try:
         os.makedirs(tmp_dir, exist_ok=True)

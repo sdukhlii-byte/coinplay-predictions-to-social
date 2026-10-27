@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, Response
 import db
 import instagram_api
 import post_filter
+import recap
 import stats
 import telegram_source
 import threads_api
@@ -108,6 +109,14 @@ async def lifespan(app: FastAPI):
     else:
         log.info("Фильтр выключен: публикуются все посты")
     log.info("Стратегия выбора: Threads=%s, X=%s", SELECT_STRATEGY, X_SELECT_STRATEGY)
+
+    if recap.config.RECAP_ENABLED:
+        log.info("Recap: итоги из CoinPlay API в %s, вертикали %s, в %02d:00 (%s)",
+                 ", ".join(recap._platforms()) or "— (нет включённых площадок)",
+                 ",".join(recap.config.RECAP_DISCIPLINES),
+                 recap.config.RECAP_HOUR, recap.config.RECAP_TZ)
+    else:
+        log.info("Recap выключен (RECAP_ENABLED=false)")
 
     if STATS_ENABLED:
         log.info("Статистика: еженедельный отчёт включён")
@@ -218,3 +227,27 @@ def admin_stats(token: str = "", days: int = 7, send: bool = True):
     if send:
         data["sent_to_telegram"] = stats.send_to_telegram(data)
     return data
+
+
+@app.get("/admin/recap")
+def admin_recap(token: str = "", kind: str = "daily"):
+    """
+    Показывает, какой пост «итоги» ушёл бы сейчас (kind=daily|weekly), и ничего
+    не публикует. Нужен, чтобы проверить связку с CoinPlay API и тексты до
+    включения RECAP_ENABLED.
+    """
+    if not ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="ADMIN_TOKEN не задан — /admin отключён.")
+    if token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Неверный token")
+    if kind not in ("daily", "weekly"):
+        raise HTTPException(status_code=400, detail="kind: daily или weekly")
+    try:
+        composed = recap.compose(kind)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"CoinPlay API: {e}")
+    body = {"kind": kind, "text": composed["text"], "text_x": composed["text_x"],
+            "chars": len(composed["text"]), "chars_x": len(composed["text_x"]),
+            "platforms": recap._platforms(), "enabled": recap.config.RECAP_ENABLED}
+    return Response(json.dumps(body, ensure_ascii=False),
+                    media_type="application/json; charset=utf-8")

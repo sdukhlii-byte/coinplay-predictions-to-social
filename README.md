@@ -162,6 +162,17 @@ x/
 |---|---|---|
 | `DATA_DIR` | `/data` | каталог Volume: база и скачанные медиа |
 | `POST_FILTER_PHRASE` | пусто | публиковать только посты с этой фразой |
+| `KIT_FILE_PHRASE` | пусто | фильтр zip-китов: обрабатываются только те, у которых имя файла или подпись содержат одну из фраз (через `\|`, без учёта регистра), например `-es.zip\|[ES]` для испанской версии |
+| `RECAP_ENABLED` | `false` | ежедневный пост «итоги вчера» и недельная сводка из CoinPlay API (см. раздел «Итоги из CoinPlay API») |
+| `COINPLAY_API_KEY` | — | ключ чтения CoinPlay API, только в переменных Railway |
+| `COINPLAY_API_CERT_SHA256` | — | отпечаток сертификата API (sha256) — проверка TLS по голому IP без `-k` |
+| `COINPLAY_API_URL` | `https://209.38.103.35/api/v1` | адрес API |
+| `RECAP_DISCIPLINES` | `soccer,ufc,tennis,dota2,cs2` | какие вертикали включать (`soccer, ufc, tennis, dota2, cs2, lol, valorant`) |
+| `RECAP_LANG` / `RECAP_TZ` / `RECAP_HOUR` | `es` / `Europe/Madrid` / `9` | язык, часовой пояс и час публикации |
+| `RECAP_WEEKLY_DAY` | `0` | день недельной сводки (0 = понедельник, `-1` = выключить) |
+| `RECAP_MIN_SAMPLE` / `RECAP_WEEKLY_MIN_SAMPLE` | `20` / `10` | минимум проверенных прогнозов, чтобы показать процент |
+| `RECAP_FOOTER`, `RECAP_THREADS_TAG`, `RECAP_X_HASHTAGS` | — / `CoinplayAI` / — | необязательная строка в конце, тема Threads, хештеги X |
+| `RECAP_DRY_RUN` | `false` | только писать текст в лог, не публиковать |
 | `STRIP_FILTER_PHRASE` | `false` | вырезать фразу из текста перед публикацией |
 | `STRIP_HASHTAGS` | `false` | убирать хештеги из текста |
 | `BURST_WINDOW_SECONDS` | `180` | окно, в котором сообщения считаются одной пачкой |
@@ -518,3 +529,23 @@ X_ACCOUNTS={"-1003952139185":{"api_key":"…","api_secret":"…","access_token":
 - Отчёт считает все пачки, где уже есть опубликованные id, независимо от статуса.
   Раньше учитывались только `posted`, и если X падал (нет кредитов), то
   Instagram/Threads/YouTube-посты из такой пачки в статистику не попадали (нули).
+
+## Итоги из CoinPlay API
+
+Модуль `recap.py` раз в сутки (в `RECAP_HOUR` по `RECAP_TZ`) берёт из API проверенные
+прогнозы (`grades`, поле `coinplay_ai_correct`) за вчера и публикует в Threads и/или X
+текстовый пост «Resultados de ayer»; в понедельник — недельную сводку. Берутся только
+цифры `coinplay_ai`, промахи тоже; процент показывается лишь при достаточной выборке.
+Если за день проверенных прогнозов нет, пост не выходит. Состояние (что уже
+опубликовано) хранится в базе на Volume, повторов после рестарта нет.
+
+Включение на сервисе (Threads ES — все вертикали, X-клон по футболу — `RECAP_DISCIPLINES=soccer`):
+
+1. `COINPLAY_API_KEY` — ключ API (только в Railway).
+2. `COINPLAY_API_CERT_SHA256` — отпечаток сертификата:
+   `openssl s_client -connect 209.38.103.35:443 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256`
+3. Проверка без публикации: `GET /admin/recap?token=ADMIN_TOKEN&kind=daily` покажет текст.
+4. `RECAP_ENABLED=true`. Сначала можно `RECAP_DRY_RUN=true` — текст уйдёт только в лог.
+
+Публикует на те площадки, что включены на сервисе (Threads, X). Instagram и YouTube
+пропускаются: им нужна картинка/видео.
