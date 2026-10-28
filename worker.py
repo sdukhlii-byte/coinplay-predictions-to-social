@@ -31,6 +31,7 @@ from config import (
     INSTAGRAM_CAPTION_LIMIT,
     INSTAGRAM_ENABLED,
     INSTAGRAM_HASHTAGS,
+    INSTAGRAM_IMAGES_ONLY,
     INSTAGRAM_SELECT_STRATEGY,
     MAX_ATTEMPTS,
     SELECT_STRATEGY,
@@ -164,6 +165,8 @@ def _finalize_threads(text: str, media_entries: list, chat_id=None):
 def _finalize_instagram(text: str, media_entries: list, chat_id=None):
     text = _clean_text(text)
     text = hashtags.append(text, _hashtags_for("instagram", chat_id, INSTAGRAM_HASHTAGS), INSTAGRAM_CAPTION_LIMIT)
+    if INSTAGRAM_IMAGES_ONLY:
+        media_entries = [m for m in media_entries if m["kind"] == "image"]
     media = [
         {"kind": m["kind"], "url": telegram_source.media_public_url(m["key"])}
         for m in media_entries

@@ -53,6 +53,10 @@ INSTAGRAM_HASHTAGS = _opt("INSTAGRAM_HASHTAGS", "")
 # Какой вариант текста уходит в IG. Лимит подписи большой (2200), поэтому
 # по умолчанию берётся длинный вариант, как у Threads.
 INSTAGRAM_SELECT_STRATEGY = _opt("INSTAGRAM_SELECT_STRATEGY", "longest").lower()
+# true — в Instagram уходят только картинки (пост/карусель); видео из пачки
+# отбрасываются, и если картинок нет, площадка пропускается. Нужно для
+# аккаунтов, где рилсы не публикуют (например, испанский IG).
+INSTAGRAM_IMAGES_ONLY = _opt("INSTAGRAM_IMAGES_ONLY", "false").lower() == "true"
 
 if INSTAGRAM_ENABLED and not (INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID):
     raise RuntimeError(
