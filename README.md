@@ -167,11 +167,12 @@ x/
 | `COINPLAY_API_KEY` | — | ключ чтения CoinPlay API, только в переменных Railway |
 | `COINPLAY_API_CERT_SHA256` | — | отпечаток сертификата API (sha256) — проверка TLS по голому IP без `-k` |
 | `COINPLAY_API_URL` | `https://209.38.103.35/api/v1` | адрес API |
-| `RECAP_DISCIPLINES` | `soccer,ufc,tennis,dota2,cs2` | какие вертикали включать (`soccer, ufc, tennis, dota2, cs2, lol, valorant`) |
+| `RECAP_DISCIPLINES` | `soccer,ufc,tennis,dota2,cs2,valorant` | какие вертикали включать (`soccer, ufc, tennis, dota2, cs2, lol, valorant`) |
 | `RECAP_LANG` / `RECAP_TZ` / `RECAP_HOUR` | `es` / `Europe/Madrid` / `9` | язык, часовой пояс и час публикации |
 | `RECAP_WEEKLY_DAY` | `0` | день недельной сводки (0 = понедельник, `-1` = выключить) |
 | `RECAP_MIN_SAMPLE` / `RECAP_WEEKLY_MIN_SAMPLE` | `20` / `10` | минимум проверенных прогнозов, чтобы показать процент |
 | `RECAP_FOOTER`, `RECAP_THREADS_TAG`, `RECAP_X_HASHTAGS` | — / `CoinplayAI` / — | необязательная строка в конце, тема Threads, хештеги X |
+| `RECAP_PLATFORMS` | `threads` | куда публиковать итоги. По умолчанию только Threads; X — только если явно `threads,x` |
 | `RECAP_DRY_RUN` | `false` | только писать текст в лог, не публиковать |
 | `STRIP_FILTER_PHRASE` | `false` | вырезать фразу из текста перед публикацией |
 | `STRIP_HASHTAGS` | `false` | убирать хештеги из текста |
@@ -539,7 +540,7 @@ X_ACCOUNTS={"-1003952139185":{"api_key":"…","api_secret":"…","access_token":
 Если за день проверенных прогнозов нет, пост не выходит. Состояние (что уже
 опубликовано) хранится в базе на Volume, повторов после рестарта нет.
 
-Включение на сервисе (Threads ES — все вертикали, X-клон по футболу — `RECAP_DISCIPLINES=soccer`):
+Включение на сервисе Threads ES (все испанские вертикали в один аккаунт):
 
 1. `COINPLAY_API_KEY` — ключ API (только в Railway).
 2. `COINPLAY_API_CERT_SHA256` — отпечаток сертификата:
@@ -547,5 +548,5 @@ X_ACCOUNTS={"-1003952139185":{"api_key":"…","api_secret":"…","access_token":
 3. Проверка без публикации: `GET /admin/recap?token=ADMIN_TOKEN&kind=daily` покажет текст.
 4. `RECAP_ENABLED=true`. Сначала можно `RECAP_DRY_RUN=true` — текст уйдёт только в лог.
 
-Публикует на те площадки, что включены на сервисе (Threads, X). Instagram и YouTube
-пропускаются: им нужна картинка/видео.
+Публикует только в Threads (`RECAP_PLATFORMS=threads` по умолчанию), и только если Threads
+включён на сервисе; на X-клонах итоги не выходят. Instagram и YouTube пропускаются.

@@ -287,9 +287,9 @@ def compose(kind: str, now: datetime = None) -> dict:
 
 def _platforms() -> list:
     out = []
-    if config.THREADS_ENABLED:
+    if config.THREADS_ENABLED and "threads" in config.RECAP_PLATFORMS:
         out.append("threads")
-    if config.X_ENABLED:
+    if config.X_ENABLED and "x" in config.RECAP_PLATFORMS:
         out.append("x")
     return out
 

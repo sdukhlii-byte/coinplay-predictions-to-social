@@ -116,3 +116,22 @@ def test_cert_pin_mismatch_blocks_before_sending_key(monkeypatch):
     with pytest.raises(r.RecapError, match="Отпечаток"):
         r._get("catalog")
     assert Conn.sent is False
+
+
+def test_recap_goes_to_threads_only_by_default(monkeypatch):
+    r = _recap(monkeypatch, THREADS_ENABLED="true", THREADS_ACCESS_TOKEN="t",
+               THREADS_USER_ID="1", X_ENABLED="true", X_API_KEY="a", X_API_SECRET="b",
+               X_ACCESS_TOKEN="c", X_ACCESS_SECRET="d")
+    assert r._platforms() == ["threads"]
+
+
+def test_x_only_service_gets_no_recap(monkeypatch):
+    r = _recap(monkeypatch, X_ENABLED="true", X_API_KEY="a", X_API_SECRET="b",
+               X_ACCESS_TOKEN="c", X_ACCESS_SECRET="d")
+    assert r._platforms() == []
+
+
+def test_x_can_be_enabled_explicitly(monkeypatch):
+    r = _recap(monkeypatch, RECAP_PLATFORMS="threads,x", X_ENABLED="true", X_API_KEY="a",
+               X_API_SECRET="b", X_ACCESS_TOKEN="c", X_ACCESS_SECRET="d")
+    assert r._platforms() == ["x"]

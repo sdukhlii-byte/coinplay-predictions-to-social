@@ -395,8 +395,13 @@ COINPLAY_API_CERT_SHA256 = _opt("COINPLAY_API_CERT_SHA256").replace(":", "").low
 # Какие вертикали включать: soccer, ufc, tennis, dota2, cs2, lol, valorant.
 # У сервиса одной вертикали (например X-аккаунт по футболу) — одно значение.
 RECAP_DISCIPLINES = [x.strip().lower() for x in
-                     _opt("RECAP_DISCIPLINES", "soccer,ufc,tennis,dota2,cs2").split(",")
+                     _opt("RECAP_DISCIPLINES", "soccer,ufc,tennis,dota2,cs2,valorant").split(",")
                      if x.strip()]
+# На какие площадки публиковать итоги. По умолчанию только Threads: в X
+# вертикальные аккаунты (теннис, UFC, Dota 2...) итоги других вертикалей
+# получать не должны. Чтобы включить X — явно "threads,x".
+RECAP_PLATFORMS = [x.strip().lower() for x in
+                   _opt("RECAP_PLATFORMS", "threads").split(",") if x.strip()]
 RECAP_LANG = _opt("RECAP_LANG", "es").lower()          # es | en
 RECAP_TZ = _opt("RECAP_TZ", "Europe/Madrid")
 RECAP_HOUR = int(_opt("RECAP_HOUR", "9"))              # час публикации по RECAP_TZ
