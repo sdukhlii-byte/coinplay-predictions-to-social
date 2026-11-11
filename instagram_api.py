@@ -24,6 +24,7 @@ Instagram не поддерживает "тред" и не режет длинн
 ужимается под лимит (IG_CAPTION_LIMIT).
 """
 
+import hashlib
 import logging
 import time
 
@@ -53,9 +54,28 @@ class InstagramError(RuntimeError):
     pass
 
 
+_STATE_TOKEN = "instagram_access_token"
+_STATE_TOKEN_SRC = "instagram_access_token_src"
+
+
+def _env_fingerprint() -> str:
+    """Отпечаток токена из переменной окружения (сам токен в БД не дублируем)."""
+    return hashlib.sha256(INSTAGRAM_ACCESS_TOKEN.encode("utf-8")).hexdigest()[:16]
+
+
 def current_token() -> str:
-    """Токен из БД (если был продлён), иначе из переменной окружения."""
-    return db.get_state("instagram_access_token", INSTAGRAM_ACCESS_TOKEN)
+    """Токен из БД (если сервис сам его продлил), иначе из переменной окружения.
+
+    Продлённый токен в БД считается действительным, только пока в
+    INSTAGRAM_ACCESS_TOKEN лежит ТОТ ЖЕ токен, из которого он получен. Если
+    значение переменной заменили (например, после 190/460 «сессия сброшена»),
+    побеждает переменная, а устаревший токен из БД игнорируется. Раньше БД
+    перекрывала переменную всегда, и новый токен в Railway не применялся.
+    """
+    stored = db.get_state(_STATE_TOKEN, "")
+    if stored and db.get_state(_STATE_TOKEN_SRC, "") == _env_fingerprint():
+        return stored
+    return INSTAGRAM_ACCESS_TOKEN
 
 
 def _post(path: str, payload: dict) -> dict:
@@ -284,7 +304,8 @@ def refresh_token_if_needed(min_days_left: int = 10) -> bool:
 
     new_token = r.json().get("access_token")
     if new_token:
-        db.set_state("instagram_access_token", new_token)
+        db.set_state(_STATE_TOKEN, new_token)
+        db.set_state(_STATE_TOKEN_SRC, _env_fingerprint())
         log.info("IG-токен продлён")
         return True
     return False
