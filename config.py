@@ -171,6 +171,11 @@ POST_FILTER_PHRASE = _opt("POST_FILTER_PHRASE", "")
 # если любая фраза есть в имени zip или в подписи к нему. Пример для
 # испанской версии: KIT_FILE_PHRASE=-es.zip|[ES]. Пусто = берутся все киты.
 KIT_FILE_PHRASE = _opt("KIT_FILE_PHRASE", "")
+# Обратный фильтр: кит пропускается, если любая из фраз есть в имени zip или
+# в подписи. Нужен переводному сервису (TRANSLATE_TO): approvals-группы
+# присылают и английские, и испанские киты, а переводить надо только
+# английские. Пример: KIT_EXCLUDE_PHRASE=-es.zip|[ES]
+KIT_EXCLUDE_PHRASE = _opt("KIT_EXCLUDE_PHRASE", "")
 # Вырезать фразу-маркер из текста перед публикацией.
 STRIP_FILTER_PHRASE = _opt("STRIP_FILTER_PHRASE", "false").lower() == "true"
 
@@ -422,3 +427,13 @@ RECAP_RETRY_COOLDOWN_SECONDS = int(_opt("RECAP_RETRY_COOLDOWN_SECONDS", "3600"))
 
 if RECAP_ENABLED and not COINPLAY_API_KEY:
     raise RuntimeError("RECAP_ENABLED=true, но не задан COINPLAY_API_KEY")
+
+# --- Перевод текста перед публикацией (например, Бразилия) ---
+# TRANSLATE_TO: pt-BR (или pt) / es / en. Пусто = перевод выключен.
+# Переводится только текст; картинки публикуются как пришли (текст на самих
+# картинках не переводится).
+TRANSLATE_TO = _opt("TRANSLATE_TO", "")
+TRANSLATE_MODEL = _opt("TRANSLATE_MODEL", "claude-haiku-5-5")
+ANTHROPIC_API_KEY = _opt("ANTHROPIC_API_KEY")
+if TRANSLATE_TO and not ANTHROPIC_API_KEY:
+    raise RuntimeError("TRANSLATE_TO задан, а ANTHROPIC_API_KEY — нет")

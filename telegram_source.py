@@ -22,6 +22,7 @@ import video_bridge
 from config import (
     BURST_WAIT_SECONDS,
     BURST_WINDOW_SECONDS,
+    KIT_EXCLUDE_PHRASE,
     KIT_FILE_PHRASE,
     MEDIA_DIR,
     PUBLIC_BASE_URL,
@@ -127,6 +128,7 @@ def _is_zip(message) -> bool:
 
 
 _KIT_PHRASES = [p.strip().lower() for p in KIT_FILE_PHRASE.split("|") if p.strip()]
+_KIT_EXCLUDE = [p.strip().lower() for p in KIT_EXCLUDE_PHRASE.split("|") if p.strip()]
 
 
 async def _handle_zip(message, chat_id: int) -> None:
@@ -136,14 +138,18 @@ async def _handle_zip(message, chat_id: int) -> None:
     старого формата (манифест + отдельные фото), тут ждать нечего: всё уже
     собрано целиком внутри архива.
     """
-    if _KIT_PHRASES:
+    if _KIT_PHRASES or _KIT_EXCLUDE:
         try:
             fname = (message.file.name if message.file and message.file.name else "")
         except Exception:
             fname = ""
         haystack = f"{fname}\n{message.text or message.message or ''}".lower()
-        if not any(ph in haystack for ph in _KIT_PHRASES):
+        if _KIT_PHRASES and not any(ph in haystack for ph in _KIT_PHRASES):
             log.info("msg %s: кит %r не подходит под KIT_FILE_PHRASE — пропускаю",
+                     message.id, fname)
+            return
+        if _KIT_EXCLUDE and any(ph in haystack for ph in _KIT_EXCLUDE):
+            log.info("msg %s: кит %r попал под KIT_EXCLUDE_PHRASE — пропускаю",
                      message.id, fname)
             return
 

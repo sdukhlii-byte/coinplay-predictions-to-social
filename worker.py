@@ -16,6 +16,7 @@ import selector
 import recap
 import stats
 import telegram_source
+import translate
 import threads_api
 import x_api
 import youtube_api
@@ -139,6 +140,7 @@ def _finalize_threads(text: str, media_entries: list, chat_id=None):
 
     text = _clean_text(text)
     text = _strip_links(text)
+    text = translate.maybe(text)
 
     # Threads: один тег на пост, и он задаётся полем topic_tag, а не хештегом в тексте.
     # Хештеги в тексте Threads превращает странно: первый становится темой, но теряет "#"
@@ -164,6 +166,7 @@ def _finalize_threads(text: str, media_entries: list, chat_id=None):
 
 def _finalize_instagram(text: str, media_entries: list, chat_id=None):
     text = _clean_text(text)
+    text = translate.maybe(text)
     text = hashtags.append(text, _hashtags_for("instagram", chat_id, INSTAGRAM_HASHTAGS), INSTAGRAM_CAPTION_LIMIT)
     if INSTAGRAM_IMAGES_ONLY:
         media_entries = [m for m in media_entries if m["kind"] == "image"]
@@ -181,6 +184,7 @@ def _finalize_instagram(text: str, media_entries: list, chat_id=None):
 
 def _finalize_x(text: str, media_entries: list, chat_id=None):
     text = _clean_text(text)
+    text = translate.maybe(text)
     raw_tags = _hashtags_for("x", chat_id, X_HASHTAGS)
 
     # Какой X-аккаунт отвечает за этот источник (X_ACCOUNTS / основной).
